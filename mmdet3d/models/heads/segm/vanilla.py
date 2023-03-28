@@ -120,8 +120,8 @@ class BEVSegmentationHead(nn.Module):
         if isinstance(x, (list, tuple)):
             x = x[0]
 
-        x = self.transform(x)
-        x = self.classifier(x)
+        x = self.transform(x)  # (bs, 512, 200, 200)
+        x = self.classifier(x)  # (bs, 6, 200, 200)
 
         if self.training:
             losses = {}
