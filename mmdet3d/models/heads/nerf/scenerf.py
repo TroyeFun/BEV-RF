@@ -5,13 +5,32 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.heads.nerf.utils import (PositionalEncoding, ResnetFC, RaySOM,
-    sample_pix_from_img, compute_direction_from_pixels, sample_rays_viewdir, sample_rays_gaussian)
+    sample_pix_from_img, compute_direction_from_pixels, sample_rays_viewdir, sample_rays_gaussian,
+    cam_pts_2_cam_pts, cam_pts_2_pix, sample_feats_3d, pix_2_cam_pts)
 
 
 __all__ = ["SceneRFHead"]
+
+
+def compute_l1_loss(pred, target, predicted_depth=None):
+    """
+    pred: (3, B)
+    target: (3, B)
+    ---
+    return
+    l1_loss: (B,)
+
+    """
+    abs_diff = torch.abs(target - pred)
+    if predicted_depth is not None:
+        abs_diff = abs_diff[:, predicted_depth < 30]
+    l1_loss = abs_diff.mean(0)
+
+    return l1_loss
 
 
 @HEADS.register_module()
@@ -263,9 +282,25 @@ class SceneRFHead(nn.Module):
         }
         return ret
 
-    def _compute_reprojection_loss(self, sampled_pixels, sampled_color_source, depth_source_rendered,
+    def _compute_reprojection_loss(self, pix_source, sampled_color_source, depth_rendered,
                                   img_target, inv_K, cam_K, T_source2target):
-        pass
+        cam_source_pts = pix_2_cam_pts(pix_source, inv_K, depth_rendered)
+        cam_pts_target = cam_pts_2_cam_pts(cam_source_pts, T_source2target)
+        pix_target = cam_pts_2_pix(cam_pts_target, cam_K)
+        mask = cam_pts_target[:, 2] > 0
+        pix_source = pix_source[mask, :]
+        pix_target = pix_target[mask, :]
+        sampled_color_source = sampled_color_source[:, mask]
+
+        sampled_color_target = sample_pix_from_img(pix_target, img_target)
+        sampled_color_target_identity_reprojection = sample_pix_from_img(pix_source, img_target)
+        loss_reprojection = compute_l1_loss(sampled_color_source, sampled_color_target)
+        loss_indentity_reprojection = compute_l1_loss(
+            sampled_color_source, sampled_color_target_identity_reprojection)
+        loss_indentity_reprojection += torch.randn(loss_indentity_reprojection.shape).cuda() * 0.00001
+        loss_reprojections = torch.stack([loss_reprojection, loss_indentity_reprojection]).min(
+            dim=0)[0]
+        return loss_reprojections
 
     def _batchify_depth_and_color(self, T_source2infer, voxel_feature, sampled_pixels_batch,
                                  cam_K, inv_K, img_size, depth_window, T_cam2lidar):
@@ -281,8 +316,7 @@ class SceneRFHead(nn.Module):
             max_sample_depth=self._max_sample_depth)
         (gaussian_means_sensor_distance, gaussian_stds_sensor_distance
         ) = self._predict_gaussian_means_and_stds(
-            T_source2infer, unit_direction, self._n_gaussians,
-            voxel_feature, cam_K, T_cam2lidar, self._gaussian_std, viewdir)
+            T_source2infer, unit_direction, voxel_feature, cam_K, T_cam2lidar, viewdir)
         cam_pts_gaussian, depth_volume_gaussian, sensor_distance_gaussian = sample_rays_gaussian(
             T_source2infer, n_rays, unit_direction, gaussian_means_sensor_distance,
             gaussian_stds_sensor_distance, self._max_sample_depth, self._n_gaussians,
@@ -320,12 +354,51 @@ class SceneRFHead(nn.Module):
         ret['depth_volume'] = depth_volume
         return ret
 
-    def _predict_gaussian_means_and_stds(self, T_source2infer, unit_direction, n_gaussians,
-                                         voxel_feature, cam_K, T_cam2lidar, gaussian_std, viewdir):
-        pass
+    def _predict_gaussian_means_and_stds(self, T_source2infer, unit_direction,
+                                         voxel_feature, cam_K, T_cam2lidar, viewdir):
+        n_rays = unit_direction.shape[0]
+        step = self._max_sample_depth * 1.0 / self._n_gaussians
+        gaussian_means_sensor_distance = torch.linspace(step / 2, self._max_sample_depth - step / 2,
+                                                        self._n_gaussians).type_as(cam_K)
+        gaussian_means_sensor_distance = gaussian_means_sensor_distance.view(
+            1, self._n_gaussians, 1).expand(n_rays, -1, 1)
+        direction = unit_direction.view(n_rays, 1, 3).expand(-1, self._n_gaussians, -1)
+        gaussian_means_pts = gaussian_means_sensor_distance * direction
+        gaussian_means_pts_infer = cam_pts_2_cam_pts(gaussian_means_pts.reshape(-1, 3),
+                                                     T_source2infer)
+        gaussian_means_pts_infer = gaussian_means_pts_infer.reshape(n_rays, self._n_gaussians, 3)
+        output = self._predict(self._mlp_gaussian, gaussian_means_pts_infer, viewdir, voxel_feature,
+                               cam_K, T_cam2lidar, output_type='offset')
+        gaussian_means_offset = output[:, :, 0]
+        gaussian_stds_offset = output[:, :, 1]
+        gaussian_means_sensor_distance = gaussian_means_sensor_distance.squeeze(
+            -1) + gaussian_means_offset
+        gaussian_means_sensor_distance = torch.relu(gaussian_means_sensor_distance) + 1.5
+        gaussian_stds_sensor_distance = torch.relu(gaussian_stds_offset + self._gaussian_std) + 1.5
+        return gaussian_means_sensor_distance, gaussian_stds_sensor_distance
 
-    def _predict(self, mlp, cam_pts, viewdir, voxel_feature, cam_K, T_cam2lidar):
-        pass
+    def _predict(self, mlp, cam_pts, viewdir, voxel_feature, cam_K, T_cam2lidar,
+                 output_type='density'):
+        saved_shape = cam_pts.shape
+        cam_pts = cam_pts.reshape(-1, 3)
+        pe = self._positional_encoding(cam_pts)
+        pts_feature = sample_feats_3d(voxel_feature, cam_pts, self._scene_origin, self._scene_size)
+        viewdir = viewdir.unsqueeze(1).expand(-1, saved_shape[1], -1).reshape(-1, 3)
+        x_in = torch.cat([pts_feature, pe, viewdir], dim=-1)
+
+        if output_type == 'density':
+            mlp_output = mlp(x_in)
+            color = torch.sigmoid(mlp_output[:, :3]).view(saved_shape[0], saved_shape[1], 3)
+            density = self._density_activation(mlp_output[:, 3:4]).view(
+                saved_shape[0], saved_shape[1], 1)
+            return density, color
+        elif output_type == 'offset':
+            mlp_output = mlp(x_in)
+            residual = mlp_output.view(saved_shape[0], saved_shape[1], 2)
+            return residual
+
+    def _density_activation(self, density_logit):
+        return F.softplus(density_logit - 1, beta=1)
 
     def _render_depth_and_color(self, densities, colors, sensor_distance, depth_volume):
         sensor_distance = sensor_distance.clone()

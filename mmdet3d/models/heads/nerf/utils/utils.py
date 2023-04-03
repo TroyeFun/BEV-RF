@@ -61,12 +61,10 @@ def uniform_sampling(d_min, d_max, unit_direction):
 
     noise = torch.rand_like(sensor_distance_sampled) * step
     sensor_distance_sampled = sensor_distance_sampled + noise
-    
 
     cam_pts = sensor_distance_sampled * unit_direction
 
     return cam_pts, sensor_distance_sampled.squeeze(-1)
-
 
 
 def log_sampling(d_min, d_max, unit_direction):
@@ -151,14 +149,12 @@ def sample_rays_viewdir(
     return pts_cam, depth, sensor_distance_sampled, viewdir_infer
 
 
-
 def compute_direction_from_pixels(sampled_pixels, inv_K):
     # Unproject pixels into cam coords to get the direction\
     homo_pix = torch.cat([sampled_pixels, torch.ones_like(sampled_pixels)[:, :1]], dim=1)
     directions = (inv_K[:3, :3] @ homo_pix.T).T
     unit_direction = F.normalize(directions, dim=1)  # n_rays, 3
     return unit_direction
-
 
 
 def sample_rays_gaussian(
@@ -293,7 +289,6 @@ def cam_pts_2_pix(cam_pts, K):
     return pix
 
 
-
 def depth2disp(depth, min_depth=0.1, max_depth=100):
     """Convert depth to disp
     """
@@ -304,3 +299,8 @@ def depth2disp(depth, min_depth=0.1, max_depth=100):
     disp = scaled_disp - min_disp / (max_disp - min_disp)
 
     return disp
+
+
+# TODO:
+def sample_feats_3d(voxel_feature, pts_3d, scene_origin, scene_size):
+    pass
