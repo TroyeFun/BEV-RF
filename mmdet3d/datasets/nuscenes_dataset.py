@@ -1,13 +1,16 @@
-import tempfile
 from os import path as osp
-from typing import Any, Dict
+import random
+import tempfile
+from typing import Any, Dict, Tuple
 
 import mmcv
 import numpy as np
-import pyquaternion
-import torch
 from nuscenes.utils.data_classes import Box as NuScenesBox
+from nuscenes.nuscenes import NuScenes
+from PIL import Image
+import pyquaternion
 from pyquaternion import Quaternion
+import torch
 
 from mmdet.datasets import DATASETS
 
@@ -121,6 +124,8 @@ class NuScenesDataset(Custom3DDataset):
         "traffic_cone",
         "barrier",
     )
+    ALL_CAMERAS = ("CAM_FRONT", "CAM_FRONT_LEFT", "CAM_FRONT_RIGHT",
+                   "CAM_BACK", "CAM_BACK_LEFT", "CAM_BACK_RIGHT")
 
     def __init__(
         self,
@@ -206,7 +211,7 @@ class NuScenesDataset(Custom3DDataset):
         self.version = self.metadata["version"]
         return data_infos
 
-    def get_data_info(self, index: int) -> Dict[str, Any]:
+    def get_data_info(self, index: int, enabled_cameras=ALL_CAMERAS) -> Dict[str, Any]:
         info = self.data_infos[index]
 
         data = dict(
@@ -238,7 +243,8 @@ class NuScenesDataset(Custom3DDataset):
             data["camera_intrinsics"] = []
             data["camera2lidar"] = []
 
-            for _, camera_info in info["cams"].items():
+            for camera_name in enabled_cameras:
+                camera_info = info["cams"][camera_name]
                 data["image_paths"].append(camera_info["data_path"])
 
                 # lidar to camera transform
@@ -564,6 +570,111 @@ class NuScenesDataset(Custom3DDataset):
                 tmp_dir.cleanup()
 
         return metrics
+
+
+@DATASETS.register_module()
+class ScenerfNuScenesDataset(NuScenesDataset):
+
+    def __init__(
+        self,
+        ann_file,
+        min_frame_interval=0.4,
+        max_sequence_distance=10,
+        n_sources=1,
+        source_cameras=NuScenesDataset.ALL_CAMERAS,
+        pipeline=None,
+        dataset_root=None,
+        object_classes=None,
+        map_classes=None,
+        load_interval=1,
+        with_velocity=True,
+        modality=None,
+        box_type_3d="LiDAR",
+        filter_empty_gt=True,
+        test_mode=False,
+        eval_version="detection_cvpr_2019",
+        use_valid_flag=False,
+    ) -> None:
+        self._min_frame_interval = min_frame_interval
+        self._max_sequence_distance = max_sequence_distance
+        super().__init__(ann_file, pipeline, dataset_root, object_classes, map_classes,
+                         load_interval, with_velocity, modality, box_type_3d, filter_empty_gt,
+                         test_mode, eval_version, use_valid_flag)
+        self._n_sources = n_sources
+        self._source_cameras = source_cameras
+
+    def load_annotations(self, ann_file):
+        data_infos = super().load_annotations(ann_file)
+        token2index = {info["token"]: i for i, info in enumerate(data_infos)}
+        self._sequences = []
+        nusc = NuScenes(version=self.version, dataroot=self.dataset_root, verbose=False)
+        for index, info in enumerate(data_infos):
+            indices = [index]
+            distances = [0]
+            prev_sample = nusc.get("sample", info["token"])
+            while prev_sample["next"] != "":
+                cur_sample = nusc.get("sample", prev_sample["next"])
+                cur_index = token2index[cur_sample["token"]]
+                prev_trans = np.array(data_infos[indices[-1]]["ego2global_translation"])
+                cur_trans = np.array(data_infos[cur_index]["ego2global_translation"])
+                rel_distance = np.linalg.norm(cur_trans - prev_trans)
+                if rel_distance < self._min_frame_interval:
+                    prev_sample = cur_sample
+                    continue
+                if distances[-1] + rel_distance > self._max_sequence_distance:
+                    break
+                indices.append(cur_index)
+                distances.append(distances[-1] + rel_distance)
+                prev_sample = cur_sample
+            if len(indices) > 1:
+                self._sequences.append({"sample_indices": indices, "distances": distances})
+        return data_infos
+
+    def __len__(self):
+        return len(self._sequences)
+
+    def get_data_info(self, index: int) -> Dict[str, Any]:
+        sequence = self._sequences[index]
+        sample_indices = sequence["sample_indices"]
+        # input info
+        input_id = 0
+        data = super().get_data_info(sample_indices[input_id])
+        # source and target info, List[List[size=n_cams], size=n_sources]
+        source_imgs = []
+        target_imgs = []
+        T_source_cam2input_lidars = []
+        T_source_cam2target_cams = []
+        n_sources = min(len(sample_indices) - 1, self._n_sources)
+        source_ids = sorted(random.sample(range(1, len(sample_indices)), n_sources))
+        for source_id in source_ids:
+            target_id = source_id - 1
+            source_data = super().get_data_info(sample_indices[source_id], self._source_cameras)
+            target_data = super().get_data_info(sample_indices[target_id], self._source_cameras)
+            input_ego2global = data["ego2global"]
+            source_ego2global = source_data["ego2global"]
+            target_ego2global = target_data["ego2global"]
+            global2input_ego = np.linalg.inv(input_ego2global)
+            global2target_ego = np.linalg.inv(target_ego2global)
+            lidar2ego = data["lidar2ego"]
+            ego2lidar = np.linalg.inv(lidar2ego)
+
+            source_imgs.append([Image.open(path) for path in source_data["image_paths"]])
+            target_imgs.append([Image.open(path) for path in target_data["image_paths"]])
+            T_source_cam2input_lidars.append([])
+            T_source_cam2target_cams.append([])
+            n_cams = len(source_data["image_paths"])
+            for cam_id in range(n_cams):
+                cam2ego = data["camera2ego"][cam_id]
+                ego2cam = np.linalg.inv(cam2ego)
+                T_source_cam2input_lidars[-1].append(
+                    ego2lidar @ global2input_ego @ source_ego2global @ cam2ego)
+                T_source_cam2target_cams[-1].append(
+                    ego2cam @ global2target_ego @ source_ego2global @ cam2ego)
+        data["source_imgs"] = source_imgs
+        data["target_imgs"] = target_imgs
+        data["T_source_cam2input_lidars"] = T_source_cam2input_lidars
+        data["T_source_cam2target_cams"] = T_source_cam2target_cams
+        return data
 
 
 def output_to_nusc_box(detection):

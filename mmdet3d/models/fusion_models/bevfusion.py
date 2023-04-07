@@ -165,20 +165,20 @@ class BEVFusion(Base3DFusionModel):
     @auto_fp16(apply_to=("img", "points"))
     def forward(
         self,
-        img,
-        points,
-        camera2ego,
-        lidar2ego,
-        lidar2camera,
-        lidar2image,
-        camera_intrinsics,
-        camera2lidar,
-        img_aug_matrix,
-        lidar_aug_matrix,
+        img,  # [2, 6, 3, 256, 704]
+        points,  # List[[228806, 5], [243353, 5]]
+        camera2ego,  # [2, 6, 4, 4]
+        lidar2ego,  # [2, 4, 4]
+        lidar2camera,  # [2, 6, 4, 4]
+        lidar2image,  # [2, 6, 4, 4]
+        camera_intrinsics,  # [2, 6, 4, 4], last cols and rows are [0, 0, 0, 1]
+        camera2lidar,  # [2, 6, 4, 4]
+        img_aug_matrix,  # [2, 6, 4, 4]
+        lidar_aug_matrix,  # [2, 4, 4]
         metas,
-        gt_masks_bev=None,
-        gt_bboxes_3d=None,
-        gt_labels_3d=None,
+        gt_masks_bev=None,  # [2, 6, 200, 200]
+        gt_bboxes_3d=None,  # List[LiDARInstance3DBoxes]
+        gt_labels_3d=None,  # List[IntTensor]
         **kwargs,
     ):
         if isinstance(img, list):
