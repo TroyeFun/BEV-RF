@@ -22,28 +22,28 @@ augment3d:
   rotate: [-0.78539816, 0.78539816]
   translate: 0.5
 
-object_classes:
-  - car
-  - truck
-  - construction_vehicle
-  - bus
-  - trailer
-  - barrier
-  - motorcycle
-  - bicycle
-  - pedestrian
-  - traffic_cone
+object_classes: null
+  # - car
+  # - truck
+  # - construction_vehicle
+  # - bus
+  # - trailer
+  # - barrier
+  # - motorcycle
+  # - bicycle
+  # - pedestrian
+  # - traffic_cone
 
-map_classes:
-  - drivable_area
-  # - drivable_area*
-  - ped_crossing
-  - walkway
-  - stop_line
-  - carpark_area
-  # - road_divider
-  # - lane_divider
-  - divider
+map_classes: null
+  # - drivable_area
+  # # - drivable_area*
+  # - ped_crossing
+  # - walkway
+  # - stop_line
+  # - carpark_area
+  # # - road_divider
+  # # - lane_divider
+  # - divider
 
 input_modality:
   use_lidar: true
