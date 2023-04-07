@@ -57,9 +57,7 @@ class SceneRFHead(nn.Module):
             gaussian_std=2.5,
             max_sample_depth=100,
             som_sigma=2.0,
-            scene_size=(51.2, 51.2, 6.4),  # (x, y, z)
-            scene_origin=(-25.6, -25.6, -2),  # (x, y, z)
-            voxel_size=(0.2, 0.2, 0.2),  # (x, y, z)
+            scene_range=(-51.2, -51.2, -5.0, 51.2, 51.2, 3.0),
     ) -> None:
         super().__init__()
         self._dim_voxel_feature = dim_voxel_feature
@@ -70,9 +68,7 @@ class SceneRFHead(nn.Module):
         self._n_pts_per_gaussian = n_pts_per_gaussian
         self._gaussian_std = gaussian_std
         self._max_sample_depth = max_sample_depth
-        self._scene_size = np.array(scene_size)
-        self._scene_origin = np.array(scene_origin)
-        self._voxel_size = np.array(voxel_size)
+        self._scene_range = np.array(scene_range)
 
         self._positional_encoding = PositionalEncoding(
             num_freqs=6, include_input=True)

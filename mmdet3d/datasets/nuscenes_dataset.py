@@ -573,7 +573,7 @@ class NuScenesDataset(Custom3DDataset):
 
 
 @DATASETS.register_module()
-class ScenerfNuScenesDataset(NuScenesDataset):
+class BevnerfNuScenesDataset(NuScenesDataset):
 
     def __init__(
         self,

@@ -1,0 +1,15 @@
+model:
+  type: BEVNerf
+
+  heads:
+    nerf:
+      type: SceneRFHead
+      dim_voxel_feature: 32
+      n_rays: 200
+      n_pts_uni: 32
+      n_gaussians: 4
+      n_pts_per_gaussian: 8
+      gaussian_std: 2.5
+      max_sample_depth: 100
+      som_sigma: 2.0
+      scene_range: ${point_cloud_range}  # [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
