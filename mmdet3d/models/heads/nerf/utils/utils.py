@@ -301,6 +301,24 @@ def depth2disp(depth, min_depth=0.1, max_depth=100):
     return disp
 
 
-# TODO:
-def sample_feats_3d(voxel_feature, pts_3d, scene_origin, scene_size):
-    pass
+def sample_feats_3d(voxel_feature, pts_3d, scene_range):
+    """
+    Args:
+        voxel_feature (C, D, H, W)
+        pts_3d (N, 3)
+        scene_range (List): [min_x, min_y, min_z, max_x, max_y, max_z]
+    Returns:
+        Tensor(N, C)
+    """
+    min_x, min_y, min_z, max_x, max_y, max_z = scene_range
+    min_xyz = torch.Tensor([min_x, min_y, min_z]).type_as(pts_3d).unsqueeze(0)
+    max_xyz = torch.Tensor([max_x, max_y, max_z]).type_as(pts_3d).unsqueeze(0)
+    grid = -1 + (pts_3d - min_xyz) / (max_xyz - min_xyz) * 2
+    feats_3d = F.grid_sample(
+        voxel_feature.unsqueeze(0),
+        grid.reshape(1, 1, 1, -1, 3),
+        align_corners=False,
+        mode='bilinear',
+        padding_mode='zeros')  # (1, C, 1, 1, N)
+    feats_3d = feats_3d.reshape(feats_3d.shape[1], -1).T  # (N, C)
+    return feats_3d

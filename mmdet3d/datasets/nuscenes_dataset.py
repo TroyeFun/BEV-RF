@@ -644,6 +644,7 @@ class BevnerfNuScenesDataset(NuScenesDataset):
         target_imgs = []
         source_cam2input_lidars = []
         source_cam2target_cams = []
+        source_camera_intrinsics = []
         n_sources = min(len(sample_indices) - 1, self._n_sources)
         source_ids = sorted(random.sample(range(1, len(sample_indices)), n_sources))
         for source_id in source_ids:
@@ -662,18 +663,21 @@ class BevnerfNuScenesDataset(NuScenesDataset):
             target_imgs.append([Image.open(path) for path in target_data["image_paths"]])
             source_cam2input_lidars.append([])
             source_cam2target_cams.append([])
-            n_cams = len(source_data["image_paths"])
+            source_camera_intrinsics.append([])
+            n_cams = len(self._source_cameras)
             for cam_id in range(n_cams):
-                cam2ego = data["camera2ego"][cam_id]
+                cam2ego = source_data["camera2ego"][cam_id]
                 ego2cam = np.linalg.inv(cam2ego)
                 source_cam2input_lidars[-1].append(
                     ego2lidar @ global2input_ego @ source_ego2global @ cam2ego)
                 source_cam2target_cams[-1].append(
                     ego2cam @ global2target_ego @ source_ego2global @ cam2ego)
+                source_camera_intrinsics[-1].append(source_data["camera_intrinsics"][cam_id])
         data["source_imgs"] = source_imgs
         data["target_imgs"] = target_imgs
         data["source_cam2input_lidars"] = source_cam2input_lidars
         data["source_cam2target_cams"] = source_cam2target_cams
+        data["source_camera_intrinsics"] = source_camera_intrinsics
         return data
 
 

@@ -37,11 +37,11 @@ def compute_l1_loss(pred, target, predicted_depth=None):
 class SceneRFHead(nn.Module):
     """_summary_
 
-                   L
+                   W
         -----------------------
         |                     |
         |                     |
-        |           ---->y    | W
+        |           ---->y    | H
         |          |          |
         |          v x        |
         -----------------------
@@ -63,6 +63,7 @@ class SceneRFHead(nn.Module):
         self._dim_voxel_feature = dim_voxel_feature
 
         self._n_rays = n_rays
+        self._ray_batch_size = self._n_rays
         self._n_pts_uni = n_pts_uni
         self._n_gaussians = n_gaussians
         self._n_pts_per_gaussian = n_pts_per_gaussian
@@ -92,21 +93,18 @@ class SceneRFHead(nn.Module):
         """
         Args:
             batch (dict): {
-                'bev_feature': (B, C, W, L)
-                'T_lidar2cam': lidar2cam, (B, n_cam, 4, 4)
-                'cam_K': camera_intrinsics, (B, n_cam, 3, 3)
-
+                'bev_feature': (B, C, H, W)
+                'source_camera_intrinsics': camera_intrinsics, List[B * (n_sources, n_cam, 4, 4)]
+                'source_imgs': List[B * (n_sources, n_cam, 3, 900, 1600)]
+                'target_imgs': List[B * (n_sources, n_cam, 3, 900, 1600)]
+                'source_cam2input_lidars': List[B * (n_sources, n_cam, 4, 4)]
+                'source_cam2target_cams': List[B * (n_sources, n_cam, 4, 4)]
             }
         """
-        T_cam2lidar = torch.inverse(batch['T_lidar2cam'])
-        cam_K = batch['cam_K']
-        inv_K = torch.inverse(batch['cam_K'])
-
         bev_feature = batch['bev_feature']
-        B, C, W, L = bev_feature.shape
+        B, C, H, W = bev_feature.shape
         voxel_feature = bev_feature.reshape(
-            B, C // self._dim_voxel_feature, self._dim_voxel_feature, W, L)
-        voxel_feature = voxel_feature.permute(0, 1, 3, 4, 2).contiguous()  # (B, C, H, W, L)
+            B, self._dim_voxel_feature, C // self._dim_voxel_feature, H, W) # (B, C', D, H, W)
 
         total_loss_kl = 0
         total_loss_dist2closest = 0
@@ -116,36 +114,32 @@ class SceneRFHead(nn.Module):
         total_min_som_vars = 0
 
         for i in range(B):
-            T_source2targets = batch['T_source2targets'][i]
-            T_source2infers = batch['T_source2infers'][i]
-            img_sources = batch['img_sources'][i]
-            img_targets = batch['img_targets'][i]
-            n_sources = len(img_sources)
+            cam_K = batch['source_camera_intrinsics'][i]
+            inv_K = torch.inverse(cam_K)
+            source2targets = batch['source_cam2target_cams'][i]
+            source2inputs = batch['source_cam2input_lidars'][i]
+            source_imgs = batch['source_imgs'][i]
+            target_imgs = batch['target_imgs'][i]
+            n_sources = len(source_imgs)
+            n_cams = len(source_imgs[0])
 
             for sid in range(n_sources):
-                img_source = img_sources[sid]
-                img_target = img_targets[sid]
-
-                T_source2infer = T_source2infers[sid]
-                T_source2target = T_source2targets[sid]
-
-                ret = self._process_single_source(
-                    voxel_feature[i],
-                    cam_K=cam_K[i], inv_K=inv_K[i], img_source=img_source,img_target=img_target,
-                    T_source2target=T_source2target,
-                    T_source2infer=T_source2infer,
-                    T_cam2lidar=T_cam2lidar,
-                    step_type=step_type,
-                )
-
-                total_loss_kl += ret['loss_kl'].mean()
-                total_loss_dist2closest += ret['loss_dist2closest'].mean()
-                total_loss_reprojection += ret['loss_reprojection'].mean()
-                total_loss_color += ret['loss_color'].mean()
-                total_min_stds += ret['min_stds'].mean()
-                total_min_som_vars += ret['min_som_vars'].mean()
-
-                # TODO: evaluate depth
+                for cam_id in range(n_cams):
+                    source_img = source_imgs[sid][cam_id]
+                    target_img = target_imgs[sid][cam_id]
+                    source2input = source2inputs[sid][cam_id]
+                    source2target = source2targets[sid][cam_id]
+                    ret = self._process_single_source(
+                        voxel_feature[i], cam_K=cam_K[sid][cam_id], inv_K=inv_K[sid][cam_id],
+                        source_img=source_img, target_img=target_img,
+                        source2target=source2target, source2input=source2input)
+                    total_loss_kl += ret['loss_kl'].mean()
+                    total_loss_dist2closest += ret['loss_dist2closest'].mean()
+                    total_loss_reprojection += ret['loss_reprojection'].mean()
+                    total_loss_color += ret['loss_color'].mean()
+                    total_min_stds += ret['min_stds'].mean()
+                    total_min_som_vars += ret['min_som_vars'].mean()
+                    # TODO: evaluate depth
 
             total_loss = 0
             if self.use_reprojection:
@@ -162,20 +156,17 @@ class SceneRFHead(nn.Module):
             }
 
 
-    def _process_single_source(self, voxel_feature, cam_K, inv_K, img_source, img_target,
-                               T_source2target, T_source2infer, T_cam2lidar, step_type):
-        # TODO: check img_source.shape or raw_image.shape
-        xs = torch.arange(start=0, end=img_source.shape[1], step=2).type_as(cam_K)
-        ys = torch.arange(start=0, end=img_source.shape[2], step=2).type_as(cam_K)
+    def _process_single_source(self, voxel_feature, cam_K, inv_K, source_img, target_img,
+                               source2target, source2input):
+        xs = torch.arange(start=0, end=source_img.shape[1], step=2).type_as(cam_K)
+        ys = torch.arange(start=0, end=source_img.shape[2], step=2).type_as(cam_K)
         grid_x, grid_y = torch.meshgrid(xs, ys)
         sampled_pixels = torch.cat([grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)], dim=1)
 
         perm = torch.randperm(sampled_pixels.shape[0])
         sampled_pixels = sampled_pixels[perm[:self._n_rays]]
         render_out_dict = self._render_rays_batch(
-            cam_K, inv_K, img_source.shape[1:3], T_source2infer, voxel_feature, T_cam2lidar=T_cam2lidar,
-            ray_batch_size=sampled_pixels.shape[0], sampled_pixels=sampled_pixels,
-        )
+            inv_K, source_img.shape[1:3], source2input, voxel_feature, sampled_pixels=sampled_pixels)
 
         depth_source_rendered = render_out_dict['depth']
         color_rendered = render_out_dict['color']
@@ -185,7 +176,7 @@ class SceneRFHead(nn.Module):
         loss_kl = render_out_dict['loss_kl']
 
         weights_at_depth = render_out_dict['weights_at_depth']
-        closest_pts_to_depths = render_out_dict['closest_pts_to_depths']
+        # closest_pts_to_depths = render_out_dict['closest_pts_to_depths']
 
         # loss
         diff = torch.abs(gaussian_means - depth_source_rendered.unsqueeze(-1).detach())
@@ -195,12 +186,12 @@ class SceneRFHead(nn.Module):
         min_stds = torch.gather(gaussian_stds, 1, gaussian_idx.unsqueeze(-1))
         min_som_vars = torch.gather(som_vars, 1, gaussian_idx.unsqueeze(-1))
 
-        sampled_color_source = sample_pix_from_img(img_source, sampled_pixels)
+        sampled_color_source = sample_pix_from_img(source_img, sampled_pixels)
         loss_color = torch.abs(sampled_color_source.T - color_rendered)
 
         loss_reprojection = self._compute_reprojection_loss(
             sampled_pixels, sampled_color_source, depth_source_rendered,
-            img_target, inv_K, cam_K, T_source2target)
+            target_img, inv_K, cam_K, source2target)
 
         ret = {
             'loss_kl': loss_kl,
@@ -213,8 +204,7 @@ class SceneRFHead(nn.Module):
         }
         return ret
 
-    def _render_rays_batch(self, cam_K, inv_K, img_size, T_source2infer, voxel_feature, T_cam2lidar,
-                          ray_batch_size, sampled_pixels, depth_window=100):
+    def _render_rays_batch(self, inv_K, img_size, source2input, voxel_feature, sampled_pixels):
         depth_rendereds = []
         gaussian_means = []
         gaussian_stds = []
@@ -230,12 +220,11 @@ class SceneRFHead(nn.Module):
         cnt = 0
         loss_kl = []
 
-        for start_i in range(0, sampled_pixels.shape[0], ray_batch_size):
-            end_i = min(start_i + ray_batch_size, sampled_pixels.shape[0])
+        for start_i in range(0, sampled_pixels.shape[0], self._ray_batch_size):
+            end_i = min(start_i + self._ray_batch_size, sampled_pixels.shape[0])
             sampled_pixels_batch = sampled_pixels[start_i:end_i]
             ret = self._batchify_depth_and_color(
-                T_source2infer, voxel_feature, sampled_pixels_batch, cam_K, inv_K,
-                img_size, depth_window=depth_window, T_cam2lidar=T_cam2lidar)
+                source2input, voxel_feature, sampled_pixels_batch, inv_K, img_size)
             color_rendereds.append(ret['color'])
             depth_rendereds.append(ret['depth'])
             gaussian_means.append(ret['gaussian_means'])
@@ -279,9 +268,9 @@ class SceneRFHead(nn.Module):
         return ret
 
     def _compute_reprojection_loss(self, pix_source, sampled_color_source, depth_rendered,
-                                  img_target, inv_K, cam_K, T_source2target):
+                                  img_target, inv_K, cam_K, source2target):
         cam_source_pts = pix_2_cam_pts(pix_source, inv_K, depth_rendered)
-        cam_pts_target = cam_pts_2_cam_pts(cam_source_pts, T_source2target)
+        cam_pts_target = cam_pts_2_cam_pts(cam_source_pts, source2target)
         pix_target = cam_pts_2_pix(cam_pts_target, cam_K)
         mask = cam_pts_target[:, 2] > 0
         pix_source = pix_source[mask, :]
@@ -298,23 +287,22 @@ class SceneRFHead(nn.Module):
             dim=0)[0]
         return loss_reprojections
 
-    def _batchify_depth_and_color(self, T_source2infer, voxel_feature, sampled_pixels_batch,
-                                 cam_K, inv_K, img_size, depth_window, T_cam2lidar):
-        depths = []
+    def _batchify_depth_and_color(self, source2input, voxel_feature, sampled_pixels_batch,
+                                  inv_K, img_size):
         ret = {}
         n_rays = sampled_pixels_batch.shape[0]
         unit_direction = compute_direction_from_pixels(sampled_pixels_batch, inv_K)
         cam_pts_uni, depth_volume_uni, sensor_distance_uni, viewdir = sample_rays_viewdir(
-            inv_K, T_source2infer, img_size,
+            inv_K, source2input, img_size,
             sampled_methods='uniform',
             sampled_pixels=sampled_pixels_batch,
             n_pts_per_ray=self._n_pts_uni,
             max_sample_depth=self._max_sample_depth)
         (gaussian_means_sensor_distance, gaussian_stds_sensor_distance
         ) = self._predict_gaussian_means_and_stds(
-            T_source2infer, unit_direction, voxel_feature, cam_K, T_cam2lidar, viewdir)
+            source2input, unit_direction, voxel_feature, viewdir)
         cam_pts_gaussian, depth_volume_gaussian, sensor_distance_gaussian = sample_rays_gaussian(
-            T_source2infer, n_rays, unit_direction, gaussian_means_sensor_distance,
+            source2input, n_rays, unit_direction, gaussian_means_sensor_distance,
             gaussian_stds_sensor_distance, self._max_sample_depth, self._n_gaussians,
             self._n_pts_per_gaussian)
 
@@ -327,10 +315,8 @@ class SceneRFHead(nn.Module):
         cam_pts = torch.gather(cam_pts, 1, sorted_indices.unsqueeze(-1).expand(-1, -1, 3))
         depth_volume = torch.gather(depth_volume, 1, sorted_indices)
 
-        densities, colors = self._predict(self._mlp, cam_pts.detach(), viewdir, voxel_feature,
-                                         cam_K, T_cam2lidar)
-        rendered_out = self._render_depth_and_color(densities, colors, sensor_distance,
-                                                   depth_volume)
+        densities, colors = self._predict(self._mlp, cam_pts.detach(), viewdir, voxel_feature)
+        rendered_out = self._render_depth_and_color(densities, colors, sensor_distance, depth_volume)
         loss_kl, som_means, som_vars = self._ray_som(
             gaussian_means_sensor_distance, gaussian_stds_sensor_distance, sensor_distance,
             rendered_out['alphas'])
@@ -340,7 +326,6 @@ class SceneRFHead(nn.Module):
         ret['gaussian_means'] = gaussian_means_sensor_distance
         ret['gaussian_stds'] = gaussian_stds_sensor_distance
         ret['weights_at_depth'] = rendered_out['weights_at_depth']
-        ret['depth_window'] = depth_window
         ret['closest_pts_to_depth'] = rendered_out['closest_pts_to_depth']
         ret['loss_kl'] = loss_kl
         ret['som_vars'] = som_vars
@@ -350,21 +335,20 @@ class SceneRFHead(nn.Module):
         ret['depth_volume'] = depth_volume
         return ret
 
-    def _predict_gaussian_means_and_stds(self, T_source2infer, unit_direction,
-                                         voxel_feature, cam_K, T_cam2lidar, viewdir):
+    def _predict_gaussian_means_and_stds(self, source2input, unit_direction, voxel_feature, viewdir):
         n_rays = unit_direction.shape[0]
         step = self._max_sample_depth * 1.0 / self._n_gaussians
         gaussian_means_sensor_distance = torch.linspace(step / 2, self._max_sample_depth - step / 2,
-                                                        self._n_gaussians).type_as(cam_K)
+                                                        self._n_gaussians).type_as(unit_direction)
         gaussian_means_sensor_distance = gaussian_means_sensor_distance.view(
             1, self._n_gaussians, 1).expand(n_rays, -1, 1)
         direction = unit_direction.view(n_rays, 1, 3).expand(-1, self._n_gaussians, -1)
         gaussian_means_pts = gaussian_means_sensor_distance * direction
         gaussian_means_pts_infer = cam_pts_2_cam_pts(gaussian_means_pts.reshape(-1, 3),
-                                                     T_source2infer)
+                                                     source2input)
         gaussian_means_pts_infer = gaussian_means_pts_infer.reshape(n_rays, self._n_gaussians, 3)
         output = self._predict(self._mlp_gaussian, gaussian_means_pts_infer, viewdir, voxel_feature,
-                               cam_K, T_cam2lidar, output_type='offset')
+                               output_type='offset')
         gaussian_means_offset = output[:, :, 0]
         gaussian_stds_offset = output[:, :, 1]
         gaussian_means_sensor_distance = gaussian_means_sensor_distance.squeeze(
@@ -373,12 +357,11 @@ class SceneRFHead(nn.Module):
         gaussian_stds_sensor_distance = torch.relu(gaussian_stds_offset + self._gaussian_std) + 1.5
         return gaussian_means_sensor_distance, gaussian_stds_sensor_distance
 
-    def _predict(self, mlp, cam_pts, viewdir, voxel_feature, cam_K, T_cam2lidar,
-                 output_type='density'):
+    def _predict(self, mlp, cam_pts, viewdir, voxel_feature, output_type='density'):
         saved_shape = cam_pts.shape
         cam_pts = cam_pts.reshape(-1, 3)
         pe = self._positional_encoding(cam_pts)
-        pts_feature = sample_feats_3d(voxel_feature, cam_pts, self._scene_origin, self._scene_size)
+        pts_feature = sample_feats_3d(voxel_feature, cam_pts, self._scene_range)
         viewdir = viewdir.unsqueeze(1).expand(-1, saved_shape[1], -1).reshape(-1, 3)
         x_in = torch.cat([pts_feature, pe, viewdir], dim=-1)
 

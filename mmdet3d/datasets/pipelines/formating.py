@@ -140,7 +140,7 @@ class FormatSourceTargetData:
                 results[key][source_id] = torch.stack(results[key][source_id])
             results[key] = DC(torch.stack(results[key]), stack=False)
 
-        for key in ["source_cam2input_lidars", "source_cam2target_cams"]:
+        for key in ["source_cam2input_lidars", "source_cam2target_cams", "source_camera_intrinsics"]:
             for source_id in range(len(results[key])):
                 for cam_id in range(len(results[key][source_id])):
                     results[key][source_id][cam_id] = to_tensor(

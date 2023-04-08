@@ -16,7 +16,8 @@ load_dim: 5
 use_dim: 5
 load_augmented: null
 
-point_cloud_range: [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
+# point_cloud_range: [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
+point_cloud_range: [-25.6, -51.2, -5.0, 25.6, 51.2, 3.0]
 voxel_size: [0.1, 0.1, 0.2]  # voxel_shape: (1024, 1024, 40)
 image_size: [256, 704]
 
@@ -187,6 +188,7 @@ train_pipeline:
       - target_imgs
       - source_cam2input_lidars
       - source_cam2target_cams
+      - source_camera_intrinsics
       # - gt_bboxes_3d
       # - gt_labels_3d
       # - gt_masks_bev
@@ -266,6 +268,7 @@ test_pipeline:
       - target_imgs
       - source_cam2input_lidars
       - source_cam2target_cams
+      - source_camera_intrinsics
       - gt_bboxes_3d
       - gt_labels_3d
       - gt_masks_bev
