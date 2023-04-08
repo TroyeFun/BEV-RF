@@ -590,7 +590,7 @@ class BevnerfNuScenesDataset(NuScenesDataset):
         with_velocity=True,
         modality=None,
         box_type_3d="LiDAR",
-        filter_empty_gt=True,
+        filter_empty_gt=False,
         test_mode=False,
         eval_version="detection_cvpr_2019",
         use_valid_flag=False,
@@ -642,8 +642,8 @@ class BevnerfNuScenesDataset(NuScenesDataset):
         # source and target info, List[List[size=n_cams], size=n_sources]
         source_imgs = []
         target_imgs = []
-        T_source_cam2input_lidars = []
-        T_source_cam2target_cams = []
+        source_cam2input_lidars = []
+        source_cam2target_cams = []
         n_sources = min(len(sample_indices) - 1, self._n_sources)
         source_ids = sorted(random.sample(range(1, len(sample_indices)), n_sources))
         for source_id in source_ids:
@@ -660,20 +660,20 @@ class BevnerfNuScenesDataset(NuScenesDataset):
 
             source_imgs.append([Image.open(path) for path in source_data["image_paths"]])
             target_imgs.append([Image.open(path) for path in target_data["image_paths"]])
-            T_source_cam2input_lidars.append([])
-            T_source_cam2target_cams.append([])
+            source_cam2input_lidars.append([])
+            source_cam2target_cams.append([])
             n_cams = len(source_data["image_paths"])
             for cam_id in range(n_cams):
                 cam2ego = data["camera2ego"][cam_id]
                 ego2cam = np.linalg.inv(cam2ego)
-                T_source_cam2input_lidars[-1].append(
+                source_cam2input_lidars[-1].append(
                     ego2lidar @ global2input_ego @ source_ego2global @ cam2ego)
-                T_source_cam2target_cams[-1].append(
+                source_cam2target_cams[-1].append(
                     ego2cam @ global2target_ego @ source_ego2global @ cam2ego)
         data["source_imgs"] = source_imgs
         data["target_imgs"] = target_imgs
-        data["T_source_cam2input_lidars"] = T_source_cam2input_lidars
-        data["T_source_cam2target_cams"] = T_source_cam2target_cams
+        data["source_cam2input_lidars"] = source_cam2input_lidars
+        data["source_cam2target_cams"] = source_cam2target_cams
         return data
 
 

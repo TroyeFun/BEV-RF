@@ -1,5 +1,15 @@
 dataset_type: BevnerfNuScenesDataset
 dataset_root: data/nuscenes/
+min_frame_interval: 0.4
+max_sequence_distance: 10
+n_sources: 1
+source_cameras:
+  - CAM_FRONT
+  - CAM_FRONT_LEFT
+  - CAM_FRONT_RIGHT
+  - CAM_BACK
+  - CAM_BACK_LEFT
+  - CAM_BACK_RIGHT
 gt_paste_stop_epoch: -1
 reduce_beams: 32
 load_dim: 5
@@ -167,13 +177,19 @@ train_pipeline:
     type: DefaultFormatBundle3D
     classes: ${object_classes}
   -
+    type: FormatSourceTargetData
+  -
     type: Collect3D
     keys:
       - img
       - points
-      - gt_bboxes_3d
-      - gt_labels_3d
-      - gt_masks_bev
+      - source_imgs
+      - target_imgs
+      - source_cam2input_lidars
+      - source_cam2target_cams
+      # - gt_bboxes_3d
+      # - gt_labels_3d
+      # - gt_masks_bev
     meta_keys:
       - camera_intrinsics
       - camera2ego
@@ -240,10 +256,16 @@ test_pipeline:
     type: DefaultFormatBundle3D
     classes: ${object_classes}
   -
+    type: FormatSourceTargetData
+  -
     type: Collect3D
     keys:
       - img
       - points
+      - source_imgs
+      - target_imgs
+      - source_cam2input_lidars
+      - source_cam2target_cams
       - gt_bboxes_3d
       - gt_labels_3d
       - gt_masks_bev
@@ -261,20 +283,26 @@ data:
   samples_per_gpu: 2
   workers_per_gpu: 4
   train:
-    type: CBGSDataset
-    dataset:
-      type: ${dataset_type}
-      dataset_root: ${dataset_root}
-      ann_file: ${dataset_root + "nuscenes_infos_train.pkl"}
-      pipeline: ${train_pipeline}
-      object_classes: ${object_classes}
-      map_classes: ${map_classes}
-      modality: ${input_modality}
-      test_mode: false
-      use_valid_flag: true
-      box_type_3d: LiDAR
+    type: ${dataset_type}
+    min_frame_interval: ${min_frame_interval}
+    max_sequence_distance: ${max_sequence_distance}
+    n_sources: ${n_sources}
+    source_cameras: ${source_cameras}
+    dataset_root: ${dataset_root}
+    ann_file: ${dataset_root + "nuscenes_infos_train.pkl"}
+    pipeline: ${train_pipeline}
+    object_classes: ${object_classes}
+    map_classes: ${map_classes}
+    modality: ${input_modality}
+    test_mode: false
+    use_valid_flag: true
+    box_type_3d: LiDAR
   val:
     type: ${dataset_type}
+    min_frame_interval: ${min_frame_interval}
+    max_sequence_distance: ${max_sequence_distance}
+    n_sources: ${n_sources}
+    source_cameras: ${source_cameras}
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_val.pkl"}
     pipeline: ${test_pipeline}
@@ -285,6 +313,10 @@ data:
     box_type_3d: LiDAR
   test:
     type: ${dataset_type}
+    min_frame_interval: ${min_frame_interval}
+    max_sequence_distance: ${max_sequence_distance}
+    n_sources: ${n_sources}
+    source_cameras: ${source_cameras}
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_val.pkl"}
     pipeline: ${test_pipeline}

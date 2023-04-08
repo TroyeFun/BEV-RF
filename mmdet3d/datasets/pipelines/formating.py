@@ -8,6 +8,7 @@ from mmdet.datasets.builder import PIPELINES
 from mmdet.datasets.pipelines import to_tensor
 
 import torch
+import torchvision
 
 
 @PIPELINES.register_module()
@@ -121,6 +122,31 @@ class DefaultFormatBundle3D:
                 results["gt_bboxes_3d"] = DC(results["gt_bboxes_3d"], cpu_only=True)
             else:
                 results["gt_bboxes_3d"] = DC(to_tensor(results["gt_bboxes_3d"]))
+        return results
+
+
+@PIPELINES.register_module()
+class FormatSourceTargetData:
+
+    def __init__(self):
+        self._to_tensor = torchvision.transforms.ToTensor()
+
+    def __call__(self, results):
+        for key in ["source_imgs", "target_imgs"]:
+            for source_id in range(len(results[key])):
+                for cam_id in range(len(results[key][source_id])):
+                    results[key][source_id][cam_id] = self._to_tensor(
+                        results[key][source_id][cam_id])
+                results[key][source_id] = torch.stack(results[key][source_id])
+            results[key] = DC(torch.stack(results[key]), stack=False)
+
+        for key in ["source_cam2input_lidars", "source_cam2target_cams"]:
+            for source_id in range(len(results[key])):
+                for cam_id in range(len(results[key][source_id])):
+                    results[key][source_id][cam_id] = to_tensor(
+                        results[key][source_id][cam_id])
+                results[key][source_id] = torch.stack(results[key][source_id])
+            results[key] = DC(torch.stack(results[key]), stack=False)
         return results
 
 
