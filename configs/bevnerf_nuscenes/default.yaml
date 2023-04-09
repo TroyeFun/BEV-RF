@@ -5,11 +5,11 @@ max_sequence_distance: 10
 n_sources: 1
 source_cameras:
   - CAM_FRONT
-  - CAM_FRONT_LEFT
-  - CAM_FRONT_RIGHT
+  # - CAM_FRONT_LEFT
+  # - CAM_FRONT_RIGHT
   - CAM_BACK
-  - CAM_BACK_LEFT
-  - CAM_BACK_RIGHT
+  # - CAM_BACK_LEFT
+  # - CAM_BACK_RIGHT
 gt_paste_stop_epoch: -1
 reduce_beams: 32
 load_dim: 5
@@ -140,6 +140,12 @@ train_pipeline:
   #   rot_lim: ${augment3d.rotate}
   #   trans_lim: ${augment3d.translate}
   #   is_train: true
+  -
+    type: GlobalRotScaleTrans
+    resize_lim: [1.0, 1.0]
+    rot_lim: [0.0, 0.0]
+    trans_lim: 0.0
+    is_train: false
   # -
   #   type: LoadBEVSegmentation
   #   dataset_root: ${dataset_root}
@@ -284,7 +290,7 @@ test_pipeline:
 
 data:
   samples_per_gpu: 2
-  workers_per_gpu: 4
+  workers_per_gpu: 2
   train:
     type: ${dataset_type}
     min_frame_interval: ${min_frame_interval}

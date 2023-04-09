@@ -13,3 +13,8 @@ model:
       max_sample_depth: 100
       som_sigma: 2.0
       scene_range: ${point_cloud_range}  # [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
+      loss_weights:
+        kl: 1
+        dist2closest: 0.01
+        color: 1
+        reprojection: 1

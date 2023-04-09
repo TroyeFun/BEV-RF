@@ -175,6 +175,11 @@ class BEVNerf(Base3DFusionModel):
         camera2lidar,
         img_aug_matrix,
         lidar_aug_matrix,
+        source_imgs,
+        target_imgs,
+        source_camera_intrinsics,
+        source_cam2input_lidars,
+        source_cam2target_cams,
         metas,
         gt_masks_bev=None,
         gt_bboxes_3d=None,
@@ -195,6 +200,11 @@ class BEVNerf(Base3DFusionModel):
                 camera2lidar,
                 img_aug_matrix,
                 lidar_aug_matrix,
+                source_imgs,
+                target_imgs,
+                source_camera_intrinsics,
+                source_cam2input_lidars,
+                source_cam2target_cams,
                 metas,
                 gt_masks_bev,
                 gt_bboxes_3d,
@@ -216,6 +226,11 @@ class BEVNerf(Base3DFusionModel):
         camera2lidar,
         img_aug_matrix,
         lidar_aug_matrix,
+        source_imgs,
+        target_imgs,
+        source_camera_intrinsics,
+        source_cam2input_lidars,
+        source_cam2target_cams,
         metas,
         gt_masks_bev=None,
         gt_bboxes_3d=None,
@@ -272,6 +287,9 @@ class BEVNerf(Base3DFusionModel):
                     losses = head.loss(gt_bboxes_3d, gt_labels_3d, pred_dict)
                 elif type == "map":
                     losses = head(x, gt_masks_bev)
+                elif type == "nerf":
+                    losses = head(x, source_imgs, target_imgs, source_camera_intrinsics,
+                                  source_cam2input_lidars, source_cam2target_cams)
                 else:
                     raise ValueError(f"unsupported head: {type}")
                 for name, val in losses.items():
@@ -303,6 +321,9 @@ class BEVNerf(Base3DFusionModel):
                                 "gt_masks_bev": gt_masks_bev[k].cpu(),
                             }
                         )
+                elif type == "nerf":
+                    outputs = head(x, source_imgs, target_imgs, source_camera_intrinsics,
+                                   source_cam2input_lidars, source_cam2target_cams)
                 else:
                     raise ValueError(f"unsupported head: {type}")
             return outputs

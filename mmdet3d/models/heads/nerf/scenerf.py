@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from mmcv.runner import auto_fp16, force_fp32
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.heads.nerf.utils import (PositionalEncoding, ResnetFC, RaySOM,
     sample_pix_from_img, compute_direction_from_pixels, sample_rays_viewdir, sample_rays_gaussian,
@@ -46,6 +47,7 @@ class SceneRFHead(nn.Module):
         |          v x        |
         -----------------------
     """
+    DEFAULT_LOSS_WEIGHTS = {"kl": 1.0, "dist2closest": 0.01, "color": 1.0, "reprojection": 1.0}
 
     def __init__(
             self,
@@ -58,8 +60,10 @@ class SceneRFHead(nn.Module):
             max_sample_depth=100,
             som_sigma=2.0,
             scene_range=(-51.2, -51.2, -5.0, 51.2, 51.2, 3.0),
+            loss_weights=None,
     ) -> None:
         super().__init__()
+        self.fp16_enabled = False
         self._dim_voxel_feature = dim_voxel_feature
 
         self._n_rays = n_rays
@@ -70,6 +74,7 @@ class SceneRFHead(nn.Module):
         self._gaussian_std = gaussian_std
         self._max_sample_depth = max_sample_depth
         self._scene_range = np.array(scene_range)
+        self._loss_weights = loss_weights if loss_weights is not None else self.DEFAULT_LOSS_WEIGHTS
 
         self._positional_encoding = PositionalEncoding(
             num_freqs=6, include_input=True)
@@ -89,84 +94,72 @@ class SceneRFHead(nn.Module):
         )
         self._ray_som = RaySOM(som_sigma=som_sigma)
 
-    def forward(self, batch, step_type):
+    @force_fp32()
+    def forward(self, bev_feature, source_imgs, target_imgs, source_camera_intrinsics,
+                source_cam2input_lidars, source_cam2target_cams):
         """
         Args:
-            batch (dict): {
-                'bev_feature': (B, C, H, W)
-                'source_camera_intrinsics': camera_intrinsics, List[B * (n_sources, n_cam, 4, 4)]
-                'source_imgs': List[B * (n_sources, n_cam, 3, 900, 1600)]
-                'target_imgs': List[B * (n_sources, n_cam, 3, 900, 1600)]
-                'source_cam2input_lidars': List[B * (n_sources, n_cam, 4, 4)]
-                'source_cam2target_cams': List[B * (n_sources, n_cam, 4, 4)]
-            }
+            'bev_feature': (B, C, H, W)
+            'source_imgs': List[B * (n_sources, n_cam, 3, 900, 1600)]
+            'target_imgs': List[B * (n_sources, n_cam, 3, 900, 1600)]
+            'source_camera_intrinsics': camera_intrinsics, List[B * (n_sources, n_cam, 4, 4)]
+            'source_cam2input_lidars': List[B * (n_sources, n_cam, 4, 4)]
+            'source_cam2target_cams': List[B * (n_sources, n_cam, 4, 4)]
         """
-        bev_feature = batch['bev_feature']
+        if isinstance(bev_feature, (list, tuple)):
+            bev_feature = bev_feature[0]
+
         B, C, H, W = bev_feature.shape
         voxel_feature = bev_feature.reshape(
             B, self._dim_voxel_feature, C // self._dim_voxel_feature, H, W) # (B, C', D, H, W)
 
-        total_loss_kl = 0
-        total_loss_dist2closest = 0
-        total_loss_reprojection = 0
-        total_loss_color = 0
+        losses = {"kl": 0, "dist2closest": 0, "reprojection": 0, "color": 0}
         total_min_stds = 0
         total_min_som_vars = 0
 
         for i in range(B):
-            cam_K = batch['source_camera_intrinsics'][i]
+            cam_K = source_camera_intrinsics[i][..., :3, :3]
             inv_K = torch.inverse(cam_K)
-            source2targets = batch['source_cam2target_cams'][i]
-            source2inputs = batch['source_cam2input_lidars'][i]
-            source_imgs = batch['source_imgs'][i]
-            target_imgs = batch['target_imgs'][i]
-            n_sources = len(source_imgs)
-            n_cams = len(source_imgs[0])
+            source2targets = source_cam2target_cams[i]
+            source2inputs = source_cam2input_lidars[i]
+            source_imgs_batch = source_imgs[i]
+            target_imgs_batch = target_imgs[i]
+            n_sources = len(source_imgs_batch)
+            n_cams = len(source_imgs_batch[0])
 
             for sid in range(n_sources):
                 for cam_id in range(n_cams):
-                    source_img = source_imgs[sid][cam_id]
-                    target_img = target_imgs[sid][cam_id]
+                    source_img = source_imgs_batch[sid][cam_id]
+                    target_img = target_imgs_batch[sid][cam_id]
                     source2input = source2inputs[sid][cam_id]
                     source2target = source2targets[sid][cam_id]
                     ret = self._process_single_source(
                         voxel_feature[i], cam_K=cam_K[sid][cam_id], inv_K=inv_K[sid][cam_id],
                         source_img=source_img, target_img=target_img,
                         source2target=source2target, source2input=source2input)
-                    total_loss_kl += ret['loss_kl'].mean()
-                    total_loss_dist2closest += ret['loss_dist2closest'].mean()
-                    total_loss_reprojection += ret['loss_reprojection'].mean()
-                    total_loss_color += ret['loss_color'].mean()
+                    losses["kl"] += ret["loss_kl"].mean()
+                    losses["dist2closest"] += ret['loss_dist2closest'].mean()
+                    losses["reprojection"] += ret['loss_reprojection'].mean()
+                    losses["color"] += ret['loss_color'].mean()
                     total_min_stds += ret['min_stds'].mean()
                     total_min_som_vars += ret['min_som_vars'].mean()
                     # TODO: evaluate depth
 
-            total_loss = 0
-            if self.use_reprojection:
-                total_loss += total_loss_reprojection
-
-            if self.use_color:
-                total_loss += total_loss_color
-
-            total_loss += total_loss_kl
-            total_loss += total_loss_dist2closest * 0.01
-            total_loss /= B
-            return {
-                'total_loss': total_loss
-            }
-
+            losses = {key: loss / B / n_sources / n_cams for key, loss in losses.items()}
+            total_loss = sum([losses[key] * weight for key, weight in self._loss_weights.items()])
+            return dict(total_loss=total_loss, **losses)
 
     def _process_single_source(self, voxel_feature, cam_K, inv_K, source_img, target_img,
                                source2target, source2input):
-        xs = torch.arange(start=0, end=source_img.shape[1], step=2).type_as(cam_K)
-        ys = torch.arange(start=0, end=source_img.shape[2], step=2).type_as(cam_K)
-        grid_x, grid_y = torch.meshgrid(xs, ys)
-        sampled_pixels = torch.cat([grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)], dim=1)
+        xs = torch.arange(start=0, end=source_img.shape[2], step=2).type_as(cam_K)
+        ys = torch.arange(start=0, end=source_img.shape[1], step=2).type_as(cam_K)
+        grid_y, grid_x = torch.meshgrid(ys, xs)
+        sampled_pixels = torch.cat([grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)], dim=1)  # (x, y)
 
         perm = torch.randperm(sampled_pixels.shape[0])
         sampled_pixels = sampled_pixels[perm[:self._n_rays]]
         render_out_dict = self._render_rays_batch(
-            inv_K, source_img.shape[1:3], source2input, voxel_feature, sampled_pixels=sampled_pixels)
+            inv_K, source_img.shape, source2input, voxel_feature, sampled_pixels=sampled_pixels)
 
         depth_source_rendered = render_out_dict['depth']
         color_rendered = render_out_dict['color']
@@ -204,7 +197,7 @@ class SceneRFHead(nn.Module):
         }
         return ret
 
-    def _render_rays_batch(self, inv_K, img_size, source2input, voxel_feature, sampled_pixels):
+    def _render_rays_batch(self, inv_K, img_shape, source2input, voxel_feature, sampled_pixels):
         depth_rendereds = []
         gaussian_means = []
         gaussian_stds = []
@@ -224,7 +217,7 @@ class SceneRFHead(nn.Module):
             end_i = min(start_i + self._ray_batch_size, sampled_pixels.shape[0])
             sampled_pixels_batch = sampled_pixels[start_i:end_i]
             ret = self._batchify_depth_and_color(
-                source2input, voxel_feature, sampled_pixels_batch, inv_K, img_size)
+                source2input, voxel_feature, sampled_pixels_batch, inv_K, img_shape)
             color_rendereds.append(ret['color'])
             depth_rendereds.append(ret['depth'])
             gaussian_means.append(ret['gaussian_means'])
@@ -268,33 +261,33 @@ class SceneRFHead(nn.Module):
         return ret
 
     def _compute_reprojection_loss(self, pix_source, sampled_color_source, depth_rendered,
-                                  img_target, inv_K, cam_K, source2target):
-        cam_source_pts = pix_2_cam_pts(pix_source, inv_K, depth_rendered)
-        cam_pts_target = cam_pts_2_cam_pts(cam_source_pts, source2target)
-        pix_target = cam_pts_2_pix(cam_pts_target, cam_K)
-        mask = cam_pts_target[:, 2] > 0
+                                   target_img, inv_K, cam_K, source2target):
+        pts_source_cam = pix_2_cam_pts(pix_source, inv_K, depth_rendered)
+        pts_target_cam = cam_pts_2_cam_pts(pts_source_cam, source2target)
+        pix_target = cam_pts_2_pix(pts_target_cam, cam_K)
+        mask = pts_target_cam[:, 2] > 0
         pix_source = pix_source[mask, :]
         pix_target = pix_target[mask, :]
         sampled_color_source = sampled_color_source[:, mask]
 
-        sampled_color_target = sample_pix_from_img(pix_target, img_target)
-        sampled_color_target_identity_reprojection = sample_pix_from_img(pix_source, img_target)
+        sampled_color_target = sample_pix_from_img(target_img, pix_target)
+        sampled_color_target_identity_reprojection = sample_pix_from_img(target_img, pix_source)
         loss_reprojection = compute_l1_loss(sampled_color_source, sampled_color_target)
         loss_indentity_reprojection = compute_l1_loss(
             sampled_color_source, sampled_color_target_identity_reprojection)
-        loss_indentity_reprojection += torch.randn(loss_indentity_reprojection.shape).cuda() * 0.00001
+        loss_indentity_reprojection += torch.randn(loss_indentity_reprojection.shape).cuda() * 1e-5
         loss_reprojections = torch.stack([loss_reprojection, loss_indentity_reprojection]).min(
             dim=0)[0]
         return loss_reprojections
 
     def _batchify_depth_and_color(self, source2input, voxel_feature, sampled_pixels_batch,
-                                  inv_K, img_size):
+                                  inv_K, img_shape):
         ret = {}
         n_rays = sampled_pixels_batch.shape[0]
         unit_direction = compute_direction_from_pixels(sampled_pixels_batch, inv_K)
         cam_pts_uni, depth_volume_uni, sensor_distance_uni, viewdir = sample_rays_viewdir(
-            inv_K, source2input, img_size,
-            sampled_methods='uniform',
+            inv_K, source2input, img_shape,
+            sampling_method='uniform',
             sampled_pixels=sampled_pixels_batch,
             n_pts_per_ray=self._n_pts_uni,
             max_sample_depth=self._max_sample_depth)
@@ -369,7 +362,7 @@ class SceneRFHead(nn.Module):
             mlp_output = mlp(x_in)
             color = torch.sigmoid(mlp_output[:, :3]).view(saved_shape[0], saved_shape[1], 3)
             density = self._density_activation(mlp_output[:, 3:4]).view(
-                saved_shape[0], saved_shape[1], 1)
+                saved_shape[0], saved_shape[1])
             return density, color
         elif output_type == 'offset':
             mlp_output = mlp(x_in)

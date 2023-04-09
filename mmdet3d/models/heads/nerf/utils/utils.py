@@ -87,21 +87,21 @@ def log_sampling(d_min, d_max, unit_direction):
 
 def sample_rays_viewdir(
         inv_K, T_cam2cam,
-        img_size,
+        img_shape,
         sampling_method="uniform",  # uniform, log
         sampled_pixels=None,
         max_sample_depth=80,
         n_pts_per_ray=256,
         weights=None):
     """
-    pix: (n_rays, 2)
-    T: (4, 4)
+    sampled_pixels: (n_rays, 2)  # [x, y]
+    img_size: (3,)  # [C, H, W]
     """
     device = inv_K.device
     if sampled_pixels is None:
         sampled_pixels = torch.rand(n_rays, 2, device=device)
-        sampled_pixels[:, 0] = sampled_pixels[:, 0] * img_size[0]
-        sampled_pixels[:, 1] = sampled_pixels[:, 1] * img_size[1]
+        sampled_pixels[:, 0] = sampled_pixels[:, 0] * img_shape[2]
+        sampled_pixels[:, 1] = sampled_pixels[:, 1] * img_shape[1]
         sampled_pixels = sampled_pixels.reshape(-1, 2)
 
     n_rays = sampled_pixels.shape[0]
@@ -250,7 +250,7 @@ def cam_pts_2_cam_pts(cam_ptx_from, T):
     ones = torch.ones(cam_ptx_from.shape[0], 1, device=cam_ptx_from.device)
     homo_cam_ptx_from = torch.cat([cam_ptx_from, ones], dim=1).float()
     # print(T_cam_minus1_0.dtype, homo_cam_minus1_pts.dtype)
-    homo_cam_pts_to = (T @ homo_cam_ptx_from.T).T
+    homo_cam_pts_to = (T @ homo_cam_ptx_from.T).T  # this step may convert fp32 to fp16
     cam_pts_to = homo_cam_pts_to[:, :3]
 
     return cam_pts_to
@@ -314,6 +314,7 @@ def sample_feats_3d(voxel_feature, pts_3d, scene_range):
     min_xyz = torch.Tensor([min_x, min_y, min_z]).type_as(pts_3d).unsqueeze(0)
     max_xyz = torch.Tensor([max_x, max_y, max_z]).type_as(pts_3d).unsqueeze(0)
     grid = -1 + (pts_3d - min_xyz) / (max_xyz - min_xyz) * 2
+    grid = grid[:, [1, 0, 2]]  # (y, x, z)  --  (W, H, D)
     feats_3d = F.grid_sample(
         voxel_feature.unsqueeze(0),
         grid.reshape(1, 1, 1, -1, 3),
