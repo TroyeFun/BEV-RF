@@ -131,3 +131,4 @@ dmypy.json
 pretrained/
 runs/
 data/
+tmp_data/
