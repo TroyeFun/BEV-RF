@@ -337,10 +337,10 @@ class SceneRFHead(nn.Module):
             1, self._n_gaussians, 1).expand(n_rays, -1, 1)
         direction = unit_direction.view(n_rays, 1, 3).expand(-1, self._n_gaussians, -1)
         gaussian_means_pts = gaussian_means_sensor_distance * direction
-        gaussian_means_pts_infer = cam_pts_2_cam_pts(gaussian_means_pts.reshape(-1, 3),
+        gaussian_means_pts_input = cam_pts_2_cam_pts(gaussian_means_pts.reshape(-1, 3),
                                                      source2input)
-        gaussian_means_pts_infer = gaussian_means_pts_infer.reshape(n_rays, self._n_gaussians, 3)
-        output = self._predict(self._mlp_gaussian, gaussian_means_pts_infer, viewdir, voxel_feature,
+        gaussian_means_pts_input = gaussian_means_pts_input.reshape(n_rays, self._n_gaussians, 3)
+        output = self._predict(self._mlp_gaussian, gaussian_means_pts_input, viewdir, voxel_feature,
                                output_type='offset')
         gaussian_means_offset = output[:, :, 0]
         gaussian_stds_offset = output[:, :, 1]

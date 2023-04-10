@@ -2,6 +2,7 @@ import ipdb
 import matplotlib.cm as cm
 import numpy as np
 from sklearn.decomposition import PCA
+import torch
 
 import test_utils
 
@@ -42,5 +43,15 @@ def show_cam_pts_and_voxel_feature():
     test_utils.show_pcd(voxel_pcd)
 
 
+def modify_ckpt_vtransform_nx():
+    ckpt_path = 'pretrained/bevfusion-seg.pth'
+    new_ckpt_path = 'pretrained/bevfusion-seg-half_x_range.pth'
+    ckpt = torch.load(ckpt_path)
+    ipdb.set_trace()
+    ckpt['state_dict']['encoders.camera.vtransform.nx'][0] = 128
+    torch.save(ckpt, new_ckpt_path)
+
+
 if __name__ == '__main__':
-    show_cam_pts_and_voxel_feature()
+    # show_cam_pts_and_voxel_feature()
+    modify_ckpt_vtransform_nx()
