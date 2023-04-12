@@ -298,6 +298,7 @@ data:
     n_sources: ${n_sources}
     source_cameras: ${source_cameras}
     source_img_size: [800, 300]  # n_cols, n_rows
+    set_source_to_input: true
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_train.pkl"}
     pipeline: ${train_pipeline}
@@ -314,6 +315,7 @@ data:
     n_sources: ${n_sources}
     source_cameras: ${source_cameras}
     source_img_size: [800, 300]  # n_cols, n_rows
+    set_source_to_input: true
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_val.pkl"}
     pipeline: ${test_pipeline}
@@ -329,6 +331,7 @@ data:
     n_sources: ${n_sources}
     source_cameras: ${source_cameras}
     source_img_size: [800, 300]  # n_cols, n_rows
+    set_source_to_input: true
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_val.pkl"}
     pipeline: ${test_pipeline}

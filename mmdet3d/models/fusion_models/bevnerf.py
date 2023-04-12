@@ -299,31 +299,6 @@ class BEVNerf(Base3DFusionModel):
                         outputs[f"stats/{type}/{name}"] = val
             return outputs
         else:
-            outputs = [{} for _ in range(batch_size)]
-            for type, head in self.heads.items():
-                if type == "object":
-                    pred_dict = head(x, metas)
-                    bboxes = head.get_bboxes(pred_dict, metas)
-                    for k, (boxes, scores, labels) in enumerate(bboxes):
-                        outputs[k].update(
-                            {
-                                "boxes_3d": boxes.to("cpu"),
-                                "scores_3d": scores.cpu(),
-                                "labels_3d": labels.cpu(),
-                            }
-                        )
-                elif type == "map":
-                    logits = head(x)
-                    for k in range(batch_size):
-                        outputs[k].update(
-                            {
-                                "masks_bev": logits[k].cpu(),
-                                "gt_masks_bev": gt_masks_bev[k].cpu(),
-                            }
-                        )
-                elif type == "nerf":
-                    outputs = head(x, source_imgs, target_imgs, source_camera_intrinsics,
-                                   source_cam2input_lidars, source_cam2target_cams)
-                else:
-                    raise ValueError(f"unsupported head: {type}")
+            outputs = self.heads['nerf'](x, source_imgs, target_imgs, source_camera_intrinsics,
+                                         source_cam2input_lidars, source_cam2target_cams)
             return outputs

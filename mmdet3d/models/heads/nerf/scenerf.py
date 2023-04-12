@@ -115,6 +115,8 @@ class SceneRFHead(nn.Module):
         losses = {"kl": 0, "dist2closest": 0, "reprojection": 0, "color": 0}
         total_min_stds = 0
         total_min_som_vars = 0
+        color_rendered = [[] for _ in range(B)]
+        depth_rendered = [[] for _ in range(B)]
 
         for i in range(B):
             cam_K = source_camera_intrinsics[i][..., :3, :3]
@@ -125,6 +127,8 @@ class SceneRFHead(nn.Module):
             target_imgs_batch = target_imgs[i]
             n_sources = len(source_imgs_batch)
             n_cams = len(source_imgs_batch[0])
+            color_rendered[i] = [[None] * n_cams for _ in range(n_sources)]
+            depth_rendered[i] = [[None] * n_cams for _ in range(n_sources)]
 
             for sid in range(n_sources):
                 for cam_id in range(n_cams):
@@ -142,21 +146,31 @@ class SceneRFHead(nn.Module):
                     losses["color"] += ret['loss_color'].mean()
                     total_min_stds += ret['min_stds'].mean()
                     total_min_som_vars += ret['min_som_vars'].mean()
+                    color_rendered[i][sid][cam_id] = ret['color']
+                    depth_rendered[i][sid][cam_id] = ret['depth']
                     # TODO: evaluate depth
 
             losses = {key: loss / B / n_sources / n_cams for key, loss in losses.items()}
             total_loss = sum([losses[key] * weight for key, weight in self._loss_weights.items()])
-            return dict(total_loss=total_loss, **losses)
+
+            if self.training:
+                return dict(total_loss=total_loss, **losses)
+
+            return dict(total_loss=total_loss, color_rendered=color_rendered,
+                        depth_rendered=depth_rendered, **losses)
 
     def _process_single_source(self, voxel_feature, cam_K, inv_K, source_img, target_img,
                                source2target, source2input):
-        xs = torch.arange(start=0, end=source_img.shape[2], step=2).type_as(cam_K)
-        ys = torch.arange(start=0, end=source_img.shape[1], step=2).type_as(cam_K)
-        grid_x, grid_y = torch.meshgrid(xs, ys)
+        step = 2 if self.training else 1
+        xs = torch.arange(start=0, end=source_img.shape[2], step=step).type_as(cam_K)
+        ys = torch.arange(start=0, end=source_img.shape[1], step=step).type_as(cam_K)
+        grid_y, grid_x = torch.meshgrid(ys, xs)
         sampled_pixels = torch.cat([grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)], dim=1)  # (x, y)
 
-        perm = torch.randperm(sampled_pixels.shape[0])
-        sampled_pixels = sampled_pixels[perm[:self._n_rays]]
+        if self.training:
+            perm = torch.randperm(sampled_pixels.shape[0])
+            sampled_pixels = sampled_pixels[perm[:self._n_rays]]
+
         render_out_dict = self._render_rays_batch(
             inv_K, source_img.shape, source2input, voxel_feature, sampled_pixels=sampled_pixels)
 
@@ -185,6 +199,10 @@ class SceneRFHead(nn.Module):
             sampled_pixels, sampled_color_source, depth_source_rendered,
             target_img, inv_K, cam_K, source2target)
 
+        if not self.training:
+            color_rendered = color_rendered.reshape(grid_y.shape[0], grid_y.shape[1], 3)
+            depth_source_rendered = depth_source_rendered.reshape(grid_y.shape[0], grid_y.shape[1])
+
         ret = {
             'loss_kl': loss_kl,
             'loss_dist2closest': loss_dist2closest,
@@ -193,6 +211,8 @@ class SceneRFHead(nn.Module):
             'weights_at_depth': weights_at_depth,
             'min_som_vars': min_som_vars,
             'min_stds': min_stds,
+            'depth': depth_source_rendered,
+            'color': color_rendered,
         }
         return ret
 
