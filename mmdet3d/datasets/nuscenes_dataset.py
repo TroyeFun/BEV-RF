@@ -582,6 +582,7 @@ class BevnerfNuScenesDataset(NuScenesDataset):
         max_sequence_distance=10,
         n_sources=1,
         source_cameras=NuScenesDataset.ALL_CAMERAS,
+        source_img_size=(800, 300),  # (dim_x, dim_y) -- (n_cols, n_rows)
         pipeline=None,
         dataset_root=None,
         object_classes=None,
@@ -602,6 +603,7 @@ class BevnerfNuScenesDataset(NuScenesDataset):
                          test_mode, eval_version, use_valid_flag)
         self._n_sources = n_sources
         self._source_cameras = source_cameras
+        self._source_img_size = source_img_size
 
     def load_annotations(self, ann_file):
         data_infos = super().load_annotations(ann_file)
@@ -659,20 +661,35 @@ class BevnerfNuScenesDataset(NuScenesDataset):
             lidar2ego = data["lidar2ego"]
             ego2lidar = np.linalg.inv(lidar2ego)
 
-            source_imgs.append([Image.open(path) for path in source_data["image_paths"]])
-            target_imgs.append([Image.open(path) for path in target_data["image_paths"]])
+            source_imgs.append([])
+            target_imgs.append([])
             source_cam2input_lidars.append([])
             source_cam2target_cams.append([])
             source_camera_intrinsics.append([])
             n_cams = len(self._source_cameras)
             for cam_id in range(n_cams):
+                source_img = Image.open(source_data["image_paths"][cam_id])
+                target_img = Image.open(target_data["image_paths"][cam_id])
+                camera_intrinsics = source_data["camera_intrinsics"][cam_id].copy()
+                original_size = source_img.size
+                assert source_img.size == target_img.size
+                source_img = source_img.resize(self._source_img_size)
+                target_img = target_img.resize(self._source_img_size)
+                scale_x = self._source_img_size[0] / original_size[0]
+                scale_y = self._source_img_size[1] / original_size[1]
+                camera_intrinsics[0, :] *= scale_x
+                camera_intrinsics[1, :] *= scale_y
+                source_imgs[-1].append(source_img)
+                target_imgs[-1].append(target_img)
+                source_camera_intrinsics[-1].append(camera_intrinsics)
+
                 cam2ego = source_data["camera2ego"][cam_id]
                 ego2cam = np.linalg.inv(cam2ego)
                 source_cam2input_lidars[-1].append(
                     ego2lidar @ global2input_ego @ source_ego2global @ cam2ego)
                 source_cam2target_cams[-1].append(
                     ego2cam @ global2target_ego @ source_ego2global @ cam2ego)
-                source_camera_intrinsics[-1].append(source_data["camera_intrinsics"][cam_id])
+
         data["source_imgs"] = source_imgs
         data["target_imgs"] = target_imgs
         data["source_cam2input_lidars"] = source_cam2input_lidars

@@ -76,8 +76,7 @@ class SceneRFHead(nn.Module):
         self._scene_range = np.array(scene_range)
         self._loss_weights = loss_weights if loss_weights is not None else self.DEFAULT_LOSS_WEIGHTS
 
-        self._positional_encoding = PositionalEncoding(
-            num_freqs=6, include_input=True)
+        self._positional_encoding = PositionalEncoding(num_freqs=6, include_input=True)
         self._mlp = ResnetFC(
             d_in=39 + 3,  # positional_encoding + ray_direction
             d_out=4,
@@ -153,7 +152,7 @@ class SceneRFHead(nn.Module):
                                source2target, source2input):
         xs = torch.arange(start=0, end=source_img.shape[2], step=2).type_as(cam_K)
         ys = torch.arange(start=0, end=source_img.shape[1], step=2).type_as(cam_K)
-        grid_y, grid_x = torch.meshgrid(ys, xs)
+        grid_x, grid_y = torch.meshgrid(xs, ys)
         sampled_pixels = torch.cat([grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)], dim=1)  # (x, y)
 
         perm = torch.randperm(sampled_pixels.shape[0])
@@ -265,7 +264,9 @@ class SceneRFHead(nn.Module):
         pts_source_cam = pix_2_cam_pts(pix_source, inv_K, depth_rendered)
         pts_target_cam = cam_pts_2_cam_pts(pts_source_cam, source2target)
         pix_target = cam_pts_2_pix(pts_target_cam, cam_K)
-        mask = pts_target_cam[:, 2] > 0
+        mask = ((pts_target_cam[:, 2] > 0) *
+                (pix_target[:, 0] >= 0) * (pix_target[:, 0] <= target_img.shape[2] - 1) *
+                (pix_target[:, 1] >= 0) * (pix_target[:, 1] <= target_img.shape[1] - 1))
         pix_source = pix_source[mask, :]
         pix_target = pix_target[mask, :]
         sampled_color_source = sampled_color_source[:, mask]
@@ -355,6 +356,8 @@ class SceneRFHead(nn.Module):
         cam_pts = cam_pts.reshape(-1, 3)
         pe = self._positional_encoding(cam_pts)
         pts_feature = sample_feats_3d(voxel_feature, cam_pts, self._scene_range)
+        pts_mask = self._get_pts_in_scene_range_mask(cam_pts)
+        pts_feature[~pts_mask] = 0
         viewdir = viewdir.unsqueeze(1).expand(-1, saved_shape[1], -1).reshape(-1, 3)
         x_in = torch.cat([pts_feature, pe, viewdir], dim=-1)
 
@@ -369,11 +372,19 @@ class SceneRFHead(nn.Module):
             residual = mlp_output.view(saved_shape[0], saved_shape[1], 2)
             return residual
 
+    def _get_pts_in_scene_range_mask(self, cam_pts):
+        mask = ((cam_pts[:, 0] >= self._scene_range[0]) *
+                (cam_pts[:, 0] <= self._scene_range[3]) *
+                (cam_pts[:, 1] >= self._scene_range[1]) *
+                (cam_pts[:, 1] <= self._scene_range[4]) *
+                (cam_pts[:, 2] >= self._scene_range[2]) *
+                (cam_pts[:, 2] <= self._scene_range[5]))
+        return mask
+
     def _density_activation(self, density_logit):
         return F.softplus(density_logit - 1, beta=1)
 
     def _render_depth_and_color(self, densities, colors, sensor_distance, depth_volume):
-        sensor_distance = sensor_distance.clone()
         sensor_distance[sensor_distance < 0] = 0
         deltas = torch.zeros_like(sensor_distance)
         deltas[:, 0] = sensor_distance[:, 0]

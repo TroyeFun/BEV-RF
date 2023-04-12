@@ -23,6 +23,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("config", metavar="FILE", help="config file")
     parser.add_argument("--run-dir", metavar="DIR", help="run directory")
+    parser.add_argument("--no-validate", action="store_true", help="Don't validate model")
     args, opts = parser.parse_known_args()
 
     configs.load(args.config, recursive=True)
@@ -78,7 +79,7 @@ def main():
         datasets,
         cfg,
         distributed=True,
-        validate=True,
+        validate=(not args.no_validate),
         timestamp=timestamp,
     )
 

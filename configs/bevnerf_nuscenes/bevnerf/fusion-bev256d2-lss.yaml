@@ -81,6 +81,7 @@ model:
       type: SECOND
       in_channels: 256
       out_channels: [128, 256]
+      # out_channels: [256, 512]
       layer_nums: [5, 5]
       layer_strides: [1, 2]
       norm_cfg:
@@ -94,6 +95,8 @@ model:
       type: SECONDFPN
       in_channels: [128, 256]
       out_channels: [256, 256]
+      # in_channels: [256, 512]
+      # out_channels: [1024, 1024]
       upsample_strides: [1, 2]
       norm_cfg:
         type: BN
@@ -105,7 +108,7 @@ model:
       use_conv_for_no_stride: true
 optimizer:
   type: AdamW
-  lr: 1.0e-4
+  lr: 1.0e-5
   weight_decay: 0.01
   paramwise_cfg:
     custom_keys:

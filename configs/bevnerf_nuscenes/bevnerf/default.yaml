@@ -4,8 +4,8 @@ model:
   heads:
     nerf:
       type: SceneRFHead
-      dim_voxel_feature: 32
-      n_rays: 200
+      dim_voxel_feature: 128
+      n_rays: 1200
       n_pts_uni: 32
       n_gaussians: 4
       n_pts_per_gaussian: 8
@@ -14,7 +14,7 @@ model:
       som_sigma: 2.0
       scene_range: ${point_cloud_range}  # [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
       loss_weights:
-        kl: 1
-        dist2closest: 0.01
+        # kl: 1
+        # dist2closest: 0.01
         color: 1
-        reprojection: 1
+        # reprojection: 1

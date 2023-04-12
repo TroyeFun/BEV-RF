@@ -70,3 +70,74 @@ def save_mock_voxel_feature(voxel_feature, cam_pts, scene_range, sample_feats_3d
     dump_tensor('mock_voxel_feature', mock_voxel_feature)
     dump_tensor('mock_pts_feature', mock_pts_feature)
     dump_tensor('cam_pts', cam_pts)
+
+
+def dump_data_batch(img, points, lidar2camera, lidar2image, camera_intrinsics, img_aug_matrix,
+                    lidar_aug_matrix, source_imgs, target_imgs, source_camera_intrinsics,
+                    source_cam2input_lidars, source_cam2target_cams, metas, bev_feature,
+                    batch_id='0'):
+    save_dir = 'batch{}/'.format(batch_id)
+    os.makedirs('tmp_data/' + save_dir, exist_ok=True)
+    dump_tensor(save_dir + 'img', img)
+    for i, pcd in enumerate(points):
+        dump_tensor(save_dir + 'points{}'.format(i), pcd)
+    dump_tensor(save_dir + 'lidar2camera', lidar2camera)
+    dump_tensor(save_dir + 'lidar2image', lidar2image)
+    dump_tensor(save_dir + 'camera_intrinsics', camera_intrinsics)
+    dump_tensor(save_dir + 'img_aug_matrix', img_aug_matrix)
+    dump_tensor(save_dir + 'lidar_aug_matrix', lidar_aug_matrix)
+    dump_tensor(save_dir + 'source_imgs', torch.cat(source_imgs))
+    dump_tensor(save_dir + 'target_imgs', torch.cat(target_imgs))
+    dump_tensor(save_dir + 'source_camera_intrinsics', torch.cat(source_camera_intrinsics))
+    dump_tensor(save_dir + 'source_cam2input_lidars', torch.cat(source_cam2input_lidars))
+    dump_tensor(save_dir + 'source_cam2target_cams', torch.cat(source_cam2target_cams))
+    np.save('tmp_data/' + save_dir + 'metas.npy', np.asarray(str(metas)))
+    dump_tensor(save_dir + 'bev_feature', bev_feature)
+
+
+def project_lidar_to_image(save_name, pcd, image, lidar2camera, camera_intrinsics,
+                           lidar_aug_matrix=None, img_aug_matrix=None):
+    """
+    Args:
+        pcd (N, 3)
+        K (3, 3)
+        image (H, W, 3)
+    Returns:
+        pix (N, 2)
+    """
+    if lidar_aug_matrix is not None:
+        lidar_aug_matrix_inv = np.linalg.inv(lidar_aug_matrix)
+        pcd = pcd @ lidar_aug_matrix_inv[:3, :3] + lidar_aug_matrix_inv[:3, 3:4].T
+    pcd = pcd @ lidar2camera[:3, :3].T + lidar2camera[:3, 3:4].T
+    pcd = pcd[pcd[:, 2] > 0]
+    depth = pcd[:, 2].copy()
+    pcd /= pcd[:, 2:3]
+    pix = pcd @ camera_intrinsics.T
+    if img_aug_matrix is not None:
+        pix[:, 2] = depth
+        pix = pix @ img_aug_matrix[:3, :3].T + img_aug_matrix[:3, 3:4].T
+    mask = (pix[:, 0] >= 0) & (pix[:, 0] < image.shape[1]) & (pix[:, 1] >= 0) & (pix[:, 1] < image.shape[0])
+    pix = pix[mask]
+    depth = depth[mask]
+
+    plt.clf()
+    plt.imshow(image)
+    plt.scatter(pix[:, 0], pix[:, 1], c=depth, cmap='rainbow_r', alpha=0.2, s=0.5)
+    plt.savefig('tmp_data/' + save_name + '.png')
+
+
+def pcd_to_bev(pcd, voxel_size=(0.2, 0.2), scene_range=(-25.6, -51.2, 25.6, 51.2)):
+    """Convert point cloud to bev.
+    Returns:
+        np.ndarray: bev.
+    """
+    mask = ((pcd[:, 0] >= scene_range[0]) * (pcd[:, 0] < scene_range[2]) *
+            (pcd[:, 1] >= scene_range[1]) * (pcd[:, 1] < scene_range[3]))
+    pcd = pcd[mask]
+    coords = np.zeros_like(pcd[:, :2])
+    coords[:, 0] = (pcd[:, 0] - scene_range[0]) // voxel_size[0]
+    coords[:, 1] = (pcd[:, 1] - scene_range[1]) // voxel_size[1]
+    bev = np.zeros((int((scene_range[2] - scene_range[0]) / voxel_size[0]),
+                    int((scene_range[3] - scene_range[1]) / voxel_size[1])))
+    bev[coords[:, 0].astype(np.int64), coords[:, 1].astype(np.int64)] = 1
+    return bev

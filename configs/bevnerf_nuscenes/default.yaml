@@ -297,6 +297,7 @@ data:
     max_sequence_distance: ${max_sequence_distance}
     n_sources: ${n_sources}
     source_cameras: ${source_cameras}
+    source_img_size: [800, 300]  # n_cols, n_rows
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_train.pkl"}
     pipeline: ${train_pipeline}
@@ -312,6 +313,7 @@ data:
     max_sequence_distance: ${max_sequence_distance}
     n_sources: ${n_sources}
     source_cameras: ${source_cameras}
+    source_img_size: [800, 300]  # n_cols, n_rows
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_val.pkl"}
     pipeline: ${test_pipeline}
@@ -326,6 +328,7 @@ data:
     max_sequence_distance: ${max_sequence_distance}
     n_sources: ${n_sources}
     source_cameras: ${source_cameras}
+    source_img_size: [800, 300]  # n_cols, n_rows
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_val.pkl"}
     pipeline: ${test_pipeline}
