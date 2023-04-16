@@ -108,7 +108,7 @@ model:
       use_conv_for_no_stride: true
 optimizer:
   type: AdamW
-  lr: 1.0e-5
+  lr: 1.0e-4
   weight_decay: 0.01
   paramwise_cfg:
     custom_keys:

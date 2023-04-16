@@ -28,6 +28,7 @@ def nerf_single_gpu_test(model, data_loader):
             result = model(**data)
 
         import ipdb; ipdb.set_trace()
+        # import test_utils; test_utils.visualize_results(data, result)
         results.extend(result)
 
         batch_size = len(result)

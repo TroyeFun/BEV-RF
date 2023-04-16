@@ -141,3 +141,30 @@ def pcd_to_bev(pcd, voxel_size=(0.2, 0.2), scene_range=(-25.6, -51.2, 25.6, 51.2
                     int((scene_range[3] - scene_range[1]) / voxel_size[1])))
     bev[coords[:, 0].astype(np.int64), coords[:, 1].astype(np.int64)] = 1
     return bev
+
+
+def visualize_results(input_batch, result):
+    source_imgs = input_batch['source_imgs'].data[0]
+    color_rendered = result['color_rendered']
+    depth_rendered = result['depth_rendered']
+    color_sampled = result['color_sampled']
+    bs = len(source_imgs)
+    n_sources, n_cams = source_imgs[0].shape[:2]
+    n_imgs = bs * n_sources * n_cams
+    n_cols = 4
+
+    plt.clf()
+    fig = plt.figure(figsize=(10 * n_cols, 10 * n_imgs))
+    for bid in range(bs):
+        for sid in range(n_sources):
+            for cid in range(n_cams):
+                img_id = bid * n_sources * n_cams + sid * n_cams + cid
+                ax0 = fig.add_subplot(n_imgs, n_cols, img_id * n_cols + 1)
+                ax0.imshow(source_imgs[bid][sid][cid].permute(1, 2, 0).cpu().numpy())
+                ax1 = fig.add_subplot(n_imgs, n_cols, img_id * n_cols + 2)
+                ax1.imshow(color_rendered[bid][sid][cid].cpu().numpy())
+                ax2 = fig.add_subplot(n_imgs, n_cols, img_id * n_cols + 3)
+                ax2.imshow(depth_rendered[bid][sid][cid].cpu().numpy())
+                ax3 = fig.add_subplot(n_imgs, n_cols, img_id * n_cols + 4)
+                ax3.imshow(color_sampled[bid][sid][cid].cpu().numpy())
+    plt.show()

@@ -117,6 +117,7 @@ class SceneRFHead(nn.Module):
         total_min_som_vars = 0
         color_rendered = [[] for _ in range(B)]
         depth_rendered = [[] for _ in range(B)]
+        color_sampled = [[] for _ in range(B)]
 
         for i in range(B):
             cam_K = source_camera_intrinsics[i][..., :3, :3]
@@ -129,6 +130,7 @@ class SceneRFHead(nn.Module):
             n_cams = len(source_imgs_batch[0])
             color_rendered[i] = [[None] * n_cams for _ in range(n_sources)]
             depth_rendered[i] = [[None] * n_cams for _ in range(n_sources)]
+            color_sampled[i] = [[None] * n_cams for _ in range(n_sources)]
 
             for sid in range(n_sources):
                 for cam_id in range(n_cams):
@@ -148,16 +150,25 @@ class SceneRFHead(nn.Module):
                     total_min_som_vars += ret['min_som_vars'].mean()
                     color_rendered[i][sid][cam_id] = ret['color']
                     depth_rendered[i][sid][cam_id] = ret['depth']
+                    color_sampled[i][sid][cam_id] = ret['sampled_color_source']
                     # TODO: evaluate depth
+                color_rendered[i][sid] = torch.stack(color_rendered[i][sid])
+                depth_rendered[i][sid] = torch.stack(depth_rendered[i][sid])
+                color_sampled[i][sid] = torch.stack(color_sampled[i][sid])
 
             losses = {key: loss / B / n_sources / n_cams for key, loss in losses.items()}
             total_loss = sum([losses[key] * weight for key, weight in self._loss_weights.items()])
 
+            res = {'total_loss': total_loss, **losses}
             if self.training:
-                return dict(total_loss=total_loss, **losses)
+                return res
 
-            return dict(total_loss=total_loss, color_rendered=color_rendered,
-                        depth_rendered=depth_rendered, **losses)
+            res.update({
+                'color_rendered': color_rendered,
+                'depth_rendered': depth_rendered,
+                'color_sampled': color_sampled,
+            })
+            return res
 
     def _process_single_source(self, voxel_feature, cam_K, inv_K, source_img, target_img,
                                source2target, source2input):
@@ -202,6 +213,7 @@ class SceneRFHead(nn.Module):
         if not self.training:
             color_rendered = color_rendered.reshape(grid_y.shape[0], grid_y.shape[1], 3)
             depth_source_rendered = depth_source_rendered.reshape(grid_y.shape[0], grid_y.shape[1])
+            sampled_color_source = sampled_color_source.T.reshape(grid_y.shape[0], grid_y.shape[1], 3)
 
         ret = {
             'loss_kl': loss_kl,
@@ -213,6 +225,7 @@ class SceneRFHead(nn.Module):
             'min_stds': min_stds,
             'depth': depth_source_rendered,
             'color': color_rendered,
+            'sampled_color_source': sampled_color_source,
         }
         return ret
 
