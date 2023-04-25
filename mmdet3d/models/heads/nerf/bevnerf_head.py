@@ -14,7 +14,7 @@ from mmdet3d.models.heads.nerf.utils import (PositionalEncoding, ResnetFC, RaySO
     cam_pts_2_cam_pts, cam_pts_2_pix, sample_feats_3d, pix_2_cam_pts)
 
 
-__all__ = ["SceneRFHead"]
+__all__ = ["BEVNerfHead"]
 
 
 def compute_l1_loss(pred, target, predicted_depth=None):
@@ -35,7 +35,7 @@ def compute_l1_loss(pred, target, predicted_depth=None):
 
 
 @HEADS.register_module()
-class SceneRFHead(nn.Module):
+class BEVNerfHead(nn.Module):
     """_summary_
 
                    W
@@ -60,6 +60,7 @@ class SceneRFHead(nn.Module):
             max_sample_depth=100,
             som_sigma=2.0,
             scene_range=(-51.2, -51.2, -5.0, 51.2, 51.2, 3.0),
+            source_img_size=(800, 300),
             loss_weights=None,
     ) -> None:
         super().__init__()
@@ -74,6 +75,7 @@ class SceneRFHead(nn.Module):
         self._gaussian_std = gaussian_std
         self._max_sample_depth = max_sample_depth
         self._scene_range = np.array(scene_range)
+        self._source_img_size = source_img_size
         self._loss_weights = loss_weights if loss_weights is not None else self.DEFAULT_LOSS_WEIGHTS
 
         self._positional_encoding = PositionalEncoding(num_freqs=6, include_input=True)
@@ -183,7 +185,7 @@ class SceneRFHead(nn.Module):
             sampled_pixels = sampled_pixels[perm[:self._n_rays]]
 
         render_out_dict = self._render_rays_batch(
-            inv_K, source_img.shape, source2input, voxel_feature, sampled_pixels=sampled_pixels)
+            inv_K, source2input, voxel_feature, sampled_pixels=sampled_pixels)
 
         depth_source_rendered = render_out_dict['depth']
         color_rendered = render_out_dict['color']
@@ -229,7 +231,7 @@ class SceneRFHead(nn.Module):
         }
         return ret
 
-    def _render_rays_batch(self, inv_K, img_shape, source2input, voxel_feature, sampled_pixels):
+    def _render_rays_batch(self, inv_K, source2input, voxel_feature, sampled_pixels):
         depth_rendereds = []
         gaussian_means = []
         gaussian_stds = []
@@ -249,7 +251,7 @@ class SceneRFHead(nn.Module):
             end_i = min(start_i + self._ray_batch_size, sampled_pixels.shape[0])
             sampled_pixels_batch = sampled_pixels[start_i:end_i]
             ret = self._batchify_depth_and_color(
-                source2input, voxel_feature, sampled_pixels_batch, inv_K, img_shape)
+                source2input, voxel_feature, sampled_pixels_batch, inv_K)
             color_rendereds.append(ret['color'])
             depth_rendereds.append(ret['depth'])
             gaussian_means.append(ret['gaussian_means'])
@@ -314,13 +316,12 @@ class SceneRFHead(nn.Module):
             dim=0)[0]
         return loss_reprojections
 
-    def _batchify_depth_and_color(self, source2input, voxel_feature, sampled_pixels_batch,
-                                  inv_K, img_shape):
+    def _batchify_depth_and_color(self, source2input, voxel_feature, sampled_pixels_batch, inv_K):
         ret = {}
         n_rays = sampled_pixels_batch.shape[0]
         unit_direction = compute_direction_from_pixels(sampled_pixels_batch, inv_K)
         cam_pts_uni, depth_volume_uni, sensor_distance_uni, viewdir = sample_rays_viewdir(
-            inv_K, source2input, img_shape,
+            inv_K, source2input, self._source_img_size,
             sampling_method='uniform',
             sampled_pixels=sampled_pixels_batch,
             n_pts_per_ray=self._n_pts_uni,

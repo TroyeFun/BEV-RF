@@ -1,0 +1,23 @@
+model:
+  type: NerfFusion
+
+  heads:
+    nerf:
+      type: NerfFusionHead
+      dim_bev_feat: 512
+      dim_cam_feat: 256
+      n_rays: 1200
+      n_pts_uni: 32
+      n_gaussians: 4
+      n_pts_per_gaussian: 8
+      gaussian_std: 2.5
+      max_sample_depth: 51.2
+      som_sigma: 2.0
+      scene_range: ${point_cloud_range}  # [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
+      raw_img_size: ${raw_img_size}
+      source_img_size: ${source_img_size}
+      loss_weights:
+        # kl: 1
+        # dist2closest: 0.01
+        color: 1
+        # reprojection: 1

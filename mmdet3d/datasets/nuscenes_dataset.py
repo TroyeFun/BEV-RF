@@ -583,7 +583,9 @@ class BevnerfNuScenesDataset(NuScenesDataset):
         n_sources=1,
         source_cameras=NuScenesDataset.ALL_CAMERAS,
         source_img_size=(800, 300),  # (dim_x, dim_y) -- (n_cols, n_rows)
+        raw_img_size=(1600, 900),
         set_source_to_input=False,
+        source_cameras_only=False,
         pipeline=None,
         dataset_root=None,
         object_classes=None,
@@ -605,7 +607,9 @@ class BevnerfNuScenesDataset(NuScenesDataset):
         self._n_sources = n_sources
         self._source_cameras = source_cameras
         self._source_img_size = source_img_size
+        self._raw_img_size = raw_img_size
         self._set_source_to_input = set_source_to_input
+        self._source_cameras_only = source_cameras_only
 
     def load_annotations(self, ann_file):
         data_infos = super().load_annotations(ann_file)
@@ -640,9 +644,14 @@ class BevnerfNuScenesDataset(NuScenesDataset):
     def get_data_info(self, index: int) -> Dict[str, Any]:
         sequence = self._sequences[index]
         sample_indices = sequence["sample_indices"]
+
         # input info
         input_id = 0
-        data = super().get_data_info(sample_indices[input_id])
+        if self._source_cameras_only:
+            data = super().get_data_info(sample_indices[input_id], self._source_cameras)
+        else:
+            data = super().get_data_info(sample_indices[input_id])
+
         # source and target info, List[List[size=n_cams], size=n_sources]
         source_imgs = []
         target_imgs = []
@@ -679,12 +688,12 @@ class BevnerfNuScenesDataset(NuScenesDataset):
                 source_img = Image.open(source_data["image_paths"][cam_id])
                 target_img = Image.open(target_data["image_paths"][cam_id])
                 camera_intrinsics = source_data["camera_intrinsics"][cam_id].copy()
-                original_size = source_img.size
+                assert source_img.size == self._raw_img_size
                 assert source_img.size == target_img.size
                 source_img = source_img.resize(self._source_img_size)
                 target_img = target_img.resize(self._source_img_size)
-                scale_x = self._source_img_size[0] / original_size[0]
-                scale_y = self._source_img_size[1] / original_size[1]
+                scale_x = self._source_img_size[0] / self._raw_img_size[0]
+                scale_y = self._source_img_size[1] / self._raw_img_size[1]
                 camera_intrinsics[0, :] *= scale_x
                 camera_intrinsics[1, :] *= scale_y
                 source_imgs[-1].append(source_img)

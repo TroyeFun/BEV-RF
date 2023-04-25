@@ -87,7 +87,7 @@ def log_sampling(d_min, d_max, unit_direction):
 
 def sample_rays_viewdir(
         inv_K, T_cam2cam,
-        img_shape,
+        img_size,
         sampling_method="uniform",  # uniform, log
         sampled_pixels=None,
         max_sample_depth=80,
@@ -100,8 +100,8 @@ def sample_rays_viewdir(
     device = inv_K.device
     if sampled_pixels is None:
         sampled_pixels = torch.rand(n_rays, 2, device=device)
-        sampled_pixels[:, 0] = sampled_pixels[:, 0] * img_shape[2]
-        sampled_pixels[:, 1] = sampled_pixels[:, 1] * img_shape[1]
+        sampled_pixels[:, 0] = sampled_pixels[:, 0] * img_size[0]
+        sampled_pixels[:, 1] = sampled_pixels[:, 1] * img_size[1]
         sampled_pixels = sampled_pixels.reshape(-1, 2)
 
     n_rays = sampled_pixels.shape[0]
@@ -203,22 +203,23 @@ def sample_rays_gaussian(
     return pts_cam, depth_volume, sensor_distance_sampled
 
 
-def sample_feats_2d(x_rgb, projected_pix, img_size=(1220, 370)):
+def sample_feats_2d(x_rgb, projected_pix, img_size):
     """
-    x_rgb: (d, 370, 1220)
-    projected_pix: (N, 2)
+    x_rgb: (C, H, W)
+    projected_pix: (N, 2),  (x, y)
+    img_size: W, H
     """
     projected_pix = (projected_pix / torch.tensor(img_size).type_as(projected_pix).reshape(1, 2)) * 2 - 1
     projected_pix = projected_pix.reshape(1, 1, -1, 2)
     feats_2d = F.grid_sample(
-        x_rgb,
+        x_rgb.unsqueeze(0),
         projected_pix,
         align_corners=False,
         mode='bilinear',
         padding_mode="zeros"
-    )  # [1, d, n_rays, n_pts_per_rays]
+    )  # (1, C, 1, n_pts)
     feats_2d = feats_2d.reshape(feats_2d.shape[1], -1).T
-    return feats_2d
+    return feats_2d  # (n_pts, C)
 
 
 def sample_pix_from_img(img, pix):
@@ -323,3 +324,19 @@ def sample_feats_3d(voxel_feature, pts_3d, scene_range):
         padding_mode='zeros')  # (1, C, 1, 1, N)
     feats_3d = feats_3d.reshape(feats_3d.shape[1], -1).T  # (N, C)
     return feats_3d
+
+
+def sample_bev_feat(bev_feat, pts_3d, scene_range):
+    min_x, min_y, min_z, max_x, max_y, max_z = scene_range
+    min_xy = torch.Tensor([min_x, min_y]).type_as(pts_3d).unsqueeze(0)
+    max_xy = torch.Tensor([max_x, max_y]).type_as(pts_3d).unsqueeze(0)
+    grid = -1 + (pts_3d[:, :2] - min_xy) / (max_xy - min_xy) * 2
+    grid = grid[:, [1, 0]]  # (y, x) -- (W, H)
+    feats_2d = F.grid_sample(
+        bev_feat.unsqueeze(0),
+        grid.reshape(1, 1, -1, 2),
+        align_corners=False,
+        mode='bilinear',
+        padding_mode='zeros')  # (1, C, 1, N)
+    feats_2d = feats_2d.reshape(feats_2d.shape[1], -1).T
+    return feats_2d

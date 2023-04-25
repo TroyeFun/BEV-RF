@@ -2,4 +2,5 @@
 # Copyright @ 2023 Peking University. All rights reserved.
 # Authors: fanghongyu (fanghongyu@pku.edu.cn)
 
-from .scenerf import *
+from .bevnerf_head import *
+from .nerffusion_head import *

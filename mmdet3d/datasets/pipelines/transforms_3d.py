@@ -25,13 +25,14 @@ from .utils import noise_per_object_v3_
 @PIPELINES.register_module()
 class ImageAug3D:
     def __init__(
-        self, final_dim, resize_lim, bot_pct_lim, rot_lim, rand_flip, is_train
+        self, final_dim, resize_lim, bot_pct_lim, rot_lim, rand_flip, use_crop, is_train
     ):
         self.final_dim = final_dim
         self.resize_lim = resize_lim
         self.bot_pct_lim = bot_pct_lim
         self.rand_flip = rand_flip
         self.rot_lim = rot_lim
+        self.use_crop = use_crop
         self.is_train = is_train
 
     def sample_augmentation(self, results):
@@ -64,17 +65,28 @@ class ImageAug3D:
     ):
         # adjust image
         img = img.resize(resize_dims)
-        img = img.crop(crop)
+        if self.use_crop:
+            img = img.crop(crop)
+        else:
+            img = img.resize((self.final_dim[1], self.final_dim[0]))
         if flip:
             img = img.transpose(method=Image.FLIP_LEFT_RIGHT)
         img = img.rotate(rotate)
 
+        resize_rot = np.array([[resize, 0], [0, resize]])
+        if not self.use_crop:
+            resize_rot[0, 0] *= self.final_dim[1] / resize_dims[0]
+            resize_rot[1, 1] *= self.final_dim[0] / resize_dims[1]
+
         # post-homography transformation
-        rotation *= resize
+        rotation = resize_rot * rotation
         translation -= torch.Tensor(crop[:2])
         if flip:
             A = torch.Tensor([[-1, 0], [0, 1]])
-            b = torch.Tensor([crop[2] - crop[0], 0])
+            if self.use_crop:
+                b = torch.Tensor([crop[2] - crop[0], 0])
+            else:
+                b = torch.Tensor([self.final_dim[1], 0])
             rotation = A.matmul(rotation)
             translation = A.matmul(translation) + b
         theta = rotate / 180 * np.pi
