@@ -18,7 +18,7 @@ from mmdet3d.models import FUSIONMODELS
 
 from .base import Base3DFusionModel
 
-__all__ = ["BEVNerf"]
+__all__ = ["NerfFusion"]
 
 
 @FUSIONMODELS.register_module()
@@ -26,7 +26,6 @@ class NerfFusion(Base3DFusionModel):
     def __init__(
         self,
         encoders: Dict[str, Any],
-        fuser: Dict[str, Any],
         decoder: Dict[str, Any],
         heads: Dict[str, Any],
         **kwargs,
@@ -218,10 +217,10 @@ class NerfFusion(Base3DFusionModel):
                 cam_feat=cam_feat, bev_feat=bev_feat,
                 source_imgs=source_imgs, target_imgs=target_imgs,
                 raw_cam_Ks=camera_intrinsics, source_cam_Ks=source_camera_intrinsics,
-                lidar2cam=lidar2camera, source_cam2input_lidars=source_cam2input_lidars,
+                lidar2cams=lidar2camera, source_cam2input_lidars=source_cam2input_lidars,
                 source_cam2target_cams=source_cam2target_cams)
             for name, val in losses.items():
-                outputs[f"stats/{type}/{name}"] = val
+                outputs[f"stats/nerf/{name}"] = val
             return outputs
         else:
             outputs = self.heads['nerf'](

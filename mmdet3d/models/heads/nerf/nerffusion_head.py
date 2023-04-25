@@ -14,7 +14,7 @@ from mmdet3d.models.heads.nerf.utils import (PositionalEncoding, ResnetFC, RaySO
     cam_pts_2_cam_pts, cam_pts_2_pix, sample_bev_feat, pix_2_cam_pts, sample_feats_2d)
 
 
-__all__ = ["BEVNerfHead"]
+__all__ = ["NerfFusionHead"]
 
 
 def compute_l1_loss(pred, target, predicted_depth=None):

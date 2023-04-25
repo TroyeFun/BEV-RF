@@ -73,7 +73,7 @@ class ImageAug3D:
             img = img.transpose(method=Image.FLIP_LEFT_RIGHT)
         img = img.rotate(rotate)
 
-        resize_rot = np.array([[resize, 0], [0, resize]])
+        resize_rot = torch.eye(2) * resize
         if not self.use_crop:
             resize_rot[0, 0] *= self.final_dim[1] / resize_dims[0]
             resize_rot[1, 1] *= self.final_dim[0] / resize_dims[1]

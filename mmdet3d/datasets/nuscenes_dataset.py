@@ -606,8 +606,8 @@ class BevnerfNuScenesDataset(NuScenesDataset):
                          test_mode, eval_version, use_valid_flag)
         self._n_sources = n_sources
         self._source_cameras = source_cameras
-        self._source_img_size = source_img_size
-        self._raw_img_size = raw_img_size
+        self._source_img_size = tuple(source_img_size)
+        self._raw_img_size = tuple(raw_img_size)
         self._set_source_to_input = set_source_to_input
         self._source_cameras_only = source_cameras_only
 
@@ -688,7 +688,7 @@ class BevnerfNuScenesDataset(NuScenesDataset):
                 source_img = Image.open(source_data["image_paths"][cam_id])
                 target_img = Image.open(target_data["image_paths"][cam_id])
                 camera_intrinsics = source_data["camera_intrinsics"][cam_id].copy()
-                assert source_img.size == self._raw_img_size
+                assert source_img.size == self._raw_img_size, f'{source_img.size} != {self._raw_img_size}'
                 assert source_img.size == target_img.size
                 source_img = source_img.resize(self._source_img_size)
                 target_img = target_img.resize(self._source_img_size)
