@@ -227,6 +227,6 @@ class NerfFusion(Base3DFusionModel):
                 cam_feat=cam_feat, bev_feat=bev_feat,
                 source_imgs=source_imgs, target_imgs=target_imgs,
                 raw_cam_Ks=camera_intrinsics, source_cam_Ks=source_camera_intrinsics,
-                lidar2cam=lidar2camera, source_cam2input_lidars=source_cam2input_lidars,
+                lidar2cams=lidar2camera, source_cam2input_lidars=source_cam2input_lidars,
                 source_cam2target_cams=source_cam2target_cams)
             return outputs
