@@ -31,7 +31,7 @@ def nerf_single_gpu_test(model, data_loader):
         # import test_utils; test_utils.visualize_results(data, result)
         results.extend(result)
 
-        batch_size = len(result)
+        batch_size = data['img'].data[0].shape[0]
         for _ in range(batch_size):
             prog_bar.update()
     return results

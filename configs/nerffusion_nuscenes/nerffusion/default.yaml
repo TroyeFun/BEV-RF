@@ -11,7 +11,7 @@ model:
       n_gaussians: 4
       n_pts_per_gaussian: 8
       gaussian_std: 2.5
-      max_sample_depth: 51.2
+      max_sample_depth: 100
       som_sigma: 2.0
       scene_range: ${point_cloud_range}  # [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
       raw_img_size: ${raw_img_size}

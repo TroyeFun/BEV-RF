@@ -1,7 +1,7 @@
 dataset_type: BevnerfNuScenesDataset
 dataset_root: data/nuscenes/
 min_frame_interval: 0.4
-max_sequence_distance: 10
+max_sequence_distance: 6
 n_sources: 1
 source_cameras:
   - CAM_FRONT
@@ -303,7 +303,7 @@ data:
     source_cameras: ${source_cameras}
     source_img_size: ${source_img_size}  # n_cols, n_rows
     raw_img_size: ${raw_img_size}
-    set_source_to_input: true
+    set_source_to_input: false
     source_cameras_only: true
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_train.pkl"}
@@ -322,7 +322,7 @@ data:
     source_cameras: ${source_cameras}
     source_img_size: ${source_img_size}  # n_cols, n_rows
     raw_img_size: ${raw_img_size}
-    set_source_to_input: true
+    set_source_to_input: false
     source_cameras_only: true
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_val.pkl"}
@@ -340,7 +340,7 @@ data:
     source_cameras: ${source_cameras}
     source_img_size: ${source_img_size}  # n_cols, n_rows
     raw_img_size: ${raw_img_size}
-    set_source_to_input: true
+    set_source_to_input: false
     source_cameras_only: true
     dataset_root: ${dataset_root}
     ann_file: ${dataset_root + "nuscenes_infos_val.pkl"}
