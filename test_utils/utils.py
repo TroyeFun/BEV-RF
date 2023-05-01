@@ -143,7 +143,9 @@ def pcd_to_bev(pcd, voxel_size=(0.2, 0.2), scene_range=(-25.6, -51.2, 25.6, 51.2
     return bev
 
 
-def visualize_results(input_batch, result):
+def visualize_results(input_batch, result, save_path):
+    input_imgs = input_batch['img'].data[0]
+    input_imgs = (input_imgs - input_imgs.min()) / (input_imgs.max() - input_imgs.min())
     source_imgs = input_batch['source_imgs'].data[0]
     color_rendered = result['color_rendered']
     depth_rendered = result['depth_rendered']
@@ -160,11 +162,12 @@ def visualize_results(input_batch, result):
             for cid in range(n_cams):
                 img_id = bid * n_sources * n_cams + sid * n_cams + cid
                 ax0 = fig.add_subplot(n_imgs, n_cols, img_id * n_cols + 1)
-                ax0.imshow(source_imgs[bid][sid][cid].permute(1, 2, 0).cpu().numpy())
+                ax0.imshow(input_imgs[bid][cid].permute(1, 2, 0).cpu().numpy())
                 ax1 = fig.add_subplot(n_imgs, n_cols, img_id * n_cols + 2)
-                ax1.imshow(color_rendered[bid][sid][cid].cpu().numpy())
+                ax1.imshow(source_imgs[bid][sid][cid].permute(1, 2, 0).cpu().numpy())
                 ax2 = fig.add_subplot(n_imgs, n_cols, img_id * n_cols + 3)
-                ax2.imshow(depth_rendered[bid][sid][cid].cpu().numpy())
+                ax2.imshow(color_rendered[bid][sid][cid].cpu().numpy())
                 ax3 = fig.add_subplot(n_imgs, n_cols, img_id * n_cols + 4)
-                ax3.imshow(color_sampled[bid][sid][cid].cpu().numpy())
+                ax3.imshow(depth_rendered[bid][sid][cid].cpu().numpy(), cmap='rainbow_r')
+    plt.savefig(save_path)
     plt.show()

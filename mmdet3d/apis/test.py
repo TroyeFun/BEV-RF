@@ -1,5 +1,10 @@
+import os
+import os.path as osp
+
 import mmcv
 import torch
+
+from test_utils import visualize_results
 
 
 def single_gpu_test(model, data_loader):
@@ -18,17 +23,20 @@ def single_gpu_test(model, data_loader):
     return results
 
 
-def nerf_single_gpu_test(model, data_loader):
+def nerf_single_gpu_test(model, data_loader, save_dir):
     model.eval()
     results = []
     dataset = data_loader.dataset
     prog_bar = mmcv.ProgressBar(len(dataset))
-    for data in data_loader:
+    os.makedirs(osp.join(save_dir, 'vis'), exist_ok=True)
+    for i, data in enumerate(data_loader):
         with torch.no_grad():
             result = model(**data)
 
         import ipdb; ipdb.set_trace()
-        # import test_utils; test_utils.visualize_results(data, result)
+        if i < 100:
+            vis_path = osp.join(save_dir, 'vis', f'{i}.png')
+            visualize_results(data, result, vis_path)
         results.extend(result)
 
         batch_size = data['img'].data[0].shape[0]

@@ -25,6 +25,7 @@ model:
         in_channels: [192, 384, 768]
         out_channels: 256
         start_level: 0
+        end_level: 3
         num_outs: 3
         norm_cfg:
           type: BN2d

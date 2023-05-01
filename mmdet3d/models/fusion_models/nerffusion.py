@@ -75,13 +75,18 @@ class NerfFusion(Base3DFusionModel):
         x,
     ) -> torch.Tensor:
         B, N, C, H, W = x.size()
-        x = x.view(B * N, C, H, W)
+        imgs = x.view(B * N, C, H, W)  # (6, 3, 256, 704), bs=1
 
-        x = self.encoders["camera"]["backbone"](x)
-        x = self.encoders["camera"]["neck"](x)
+        x = self.encoders["camera"]["backbone"](imgs)  # [(6, 192, 32, 88), (6, 384, 16, 44), (6, 768, 8, 22)]
+        x = self.encoders["camera"]["neck"](x) # [(6, 256, 32, 88), (6, 256, 16, 44), (6, 256, 8, 22)]
 
-        if not isinstance(x, torch.Tensor):
-            x = x[0]
+        # upsample features to original image size and concat 
+        cam_feat_h, cam_feat_w = x[0].size(2), x[0].size(3)
+        x = [imgs] + x
+        for i in range(len(x)):
+            x[i] = F.interpolate(x[i], size=(cam_feat_h, cam_feat_w),
+                                 **self.encoders["camera"]["neck"].upsample_cfg)
+        x = torch.cat(x, dim=1)  # (6, 3 + 256 * 3, 32, 88)
 
         BN, C, H, W = x.size()
         x = x.view(B, int(BN / B), C, H, W)
@@ -200,7 +205,7 @@ class NerfFusion(Base3DFusionModel):
             self.encoders if self.training else list(self.encoders.keys())[::-1]  # avoid OOM
         ):  # camera, lidar
             if sensor == "camera":
-                # (bs, 256, 128, 128)
+                # (bs, 3 + 256 * 3, 256, 704)
                 cam_feat = self.extract_camera_features(img)
             elif sensor == "lidar":
                 # (bs, 256, 128, 128)
@@ -209,7 +214,7 @@ class NerfFusion(Base3DFusionModel):
                 raise ValueError(f"unsupported sensor: {sensor}")
 
         bev_feat = self.decoder["backbone"](lidar_feat)  # [(bs, 128, 128, 128), (bs, 256, 64, 64))]
-        bev_feat = self.decoder["neck"](bev_feat)  # [(bs, 512, 128, 128)]
+        bev_feat = self.decoder["neck"](bev_feat)  # [(bs, 512, 64, 128)]
 
         if self.training:
             outputs = {}

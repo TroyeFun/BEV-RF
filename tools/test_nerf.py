@@ -186,9 +186,10 @@ def main():
     if args.fuse_conv_bn:
         model = fuse_conv_bn(model)
 
+    save_dir = os.path.dirname(args.checkpoint)
     if not distributed:
         model = MMDataParallel(model, device_ids=[0])
-        outputs = nerf_single_gpu_test(model, data_loader)
+        outputs = nerf_single_gpu_test(model, data_loader, save_dir)
     else:
         model = MMDistributedDataParallel(
             model.cuda(),

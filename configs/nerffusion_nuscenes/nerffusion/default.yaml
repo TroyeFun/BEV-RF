@@ -5,7 +5,7 @@ model:
     nerf:
       type: NerfFusionHead
       dim_bev_feat: 512
-      dim_cam_feat: 256
+      dim_cam_feat: 771  # 256 + 256 + 256 + 3 (laterals * 3 + raw_img)
       n_rays: 1200
       n_pts_uni: 32
       n_gaussians: 4
