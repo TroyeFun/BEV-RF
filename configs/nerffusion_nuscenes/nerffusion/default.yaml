@@ -17,7 +17,7 @@ model:
       raw_img_size: ${raw_img_size}
       source_img_size: ${source_img_size}
       loss_weights:
-        # kl: 1
-        # dist2closest: 0.01
+        kl: 1
+        dist2closest: 0.01
         color: 1
         # reprojection: 1
