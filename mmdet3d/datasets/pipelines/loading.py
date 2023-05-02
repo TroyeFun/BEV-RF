@@ -6,6 +6,7 @@ import numpy as np
 from nuscenes.map_expansion.map_api import NuScenesMap
 from nuscenes.map_expansion.map_api import locations as LOCATIONS
 from PIL import Image
+import torch
 
 
 from mmdet3d.core.points import BasePoints, get_points_type
@@ -555,4 +556,40 @@ class LoadAnnotations3D(LoadAnnotations):
         if self.with_attr_label:
             results = self._load_attr_labels(results)
 
+        return results
+
+
+@PIPELINES.register_module()
+class GetPointsInsideImages(object):
+    """Get points inside image.
+    """
+
+    def __call__(self, results):
+        """Call function to get points inside image.
+
+        Args:
+            results (dict): Result dict from :obj:`mmdet3d.CustomDataset`.
+
+        Returns:
+            dict: The dict containing the points inside image (in lidar coorindate).
+        """
+        points = results["points"].tensor[:, :3]
+        lidar2cameras = results["lidar2camera"]
+        camera_intrinsics = results["camera_intrinsics"]
+        imgs = results["img"]
+        points_inside_imgs = []
+        for i in range(len(lidar2cameras)):
+            lidar2camera = torch.as_tensor(lidar2cameras[i])
+            cam_K = torch.as_tensor(camera_intrinsics[i][:3, :3])
+            img = imgs[i]
+
+            pts_cam = points @ lidar2camera[:3, :3].T + lidar2camera[:3, 3:4].T
+            mask1 = pts_cam[:, 2] > 0
+            pts_cam = pts_cam[mask1]
+            homo_pts = pts_cam / pts_cam[:, 2:3]
+            pixels = homo_pts @ cam_K.T
+            mask2 = ((pixels[:, 0] > 1) & (pixels[:, 0] < img.size[0] - 1) &
+                     (pixels[:, 1] > 1) & (pixels[:, 1] < img.size[1] - 1))
+            points_inside_imgs.append(points[mask1][mask2].clone())
+        results["points_inside_imgs"] = points_inside_imgs
         return results

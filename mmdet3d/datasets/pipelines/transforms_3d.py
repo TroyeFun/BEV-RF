@@ -80,7 +80,8 @@ class ImageAug3D:
 
         # post-homography transformation
         rotation = resize_rot * rotation
-        translation -= torch.Tensor(crop[:2])
+        if self.use_crop:
+            translation -= torch.Tensor(crop[:2])
         if flip:
             A = torch.Tensor([[-1, 0], [0, 1]])
             if self.use_crop:

@@ -54,6 +54,7 @@ class NerfFusionHead(nn.Module):
             dim_bev_feat=512,
             dim_cam_feat=256,
             n_rays=1200,
+            n_rays_for_depth_reg=1200,
             n_pts_uni=32,
             n_gaussians=4,
             n_pts_per_gaussian=8,
@@ -71,7 +72,8 @@ class NerfFusionHead(nn.Module):
         self._dim_cam_feat = dim_cam_feat
 
         self._n_rays = n_rays
-        self._ray_batch_size = self._n_rays
+        self._n_rays_for_depth_reg = n_rays_for_depth_reg
+        self._ray_batch_size = max(self._n_rays, self._n_rays_for_depth_reg)
         self._n_pts_uni = n_pts_uni
         self._n_gaussians = n_gaussians
         self._n_pts_per_gaussian = n_pts_per_gaussian
@@ -83,11 +85,18 @@ class NerfFusionHead(nn.Module):
         self._loss_weights = loss_weights if loss_weights is not None else self.DEFAULT_LOSS_WEIGHTS
 
         self._positional_encoding = PositionalEncoding(num_freqs=6, include_input=True)
-        self._mlp = ResnetFC(
+        self._mlp_color = ResnetFC(
             d_in=(39 + 3) * 2,  # positional_encoding + ray_direction
-            d_out=4,
+            d_out=3,
             n_blocks=3,
-            d_hidden=512,
+            d_hidden=256,
+            d_latent=dim_bev_feat + dim_cam_feat,
+        )
+        self._mlp_density = ResnetFC(
+            d_in=39 * 2,  # positional_encoding only
+            d_out=1,
+            n_blocks=3,
+            d_hidden=256,
             d_latent=dim_bev_feat + dim_cam_feat,
         )
         self._mlp_gaussian = ResnetFC(
@@ -101,7 +110,7 @@ class NerfFusionHead(nn.Module):
 
     @force_fp32()
     def forward(self, cam_feat, bev_feat, source_imgs, target_imgs, raw_cam_Ks, source_cam_Ks,
-                lidar2cams, source_cam2input_lidars, source_cam2target_cams):
+                lidar2cams, source_cam2input_lidars, source_cam2target_cams, points_inside_imgs):
         """
         Args:
             'cam_feat': (B, n_cam, C, H, W)
@@ -113,13 +122,14 @@ class NerfFusionHead(nn.Module):
             'lidar2cams': lidar to camera extrinsics, (B, n_cam, 4, 4)
             'source_cam2input_lidars': List[B * (n_sources, n_cam, 4, 4)]
             'source_cam2target_cams': List[B * (n_sources, n_cam, 4, 4)]
+            'points_inside_imgs': List[B * List[n_cam * (n_pts, 3)]]
         """
         if isinstance(bev_feat, (list, tuple)):
             bev_feat = bev_feat[0]
 
         batch_size, n_cams = cam_feat.shape[:2]
 
-        losses = {"kl": 0, "dist2closest": 0, "reprojection": 0, "color": 0}
+        losses = {"kl": 0, "dist2closest": 0, "reprojection": 0, "color": 0, "depth": 0}
         total_min_stds = 0
         total_min_som_vars = 0
         color_rendered = [[] for _ in range(batch_size)]
@@ -171,6 +181,15 @@ class NerfFusionHead(nn.Module):
                 depth_rendered[bid][sid] = torch.stack(depth_rendered[bid][sid])
                 color_sampled[bid][sid] = torch.stack(color_sampled[bid][sid])
 
+            if 'depth' in self._loss_weights:
+                for cam_id in range(n_cams):
+                    loss_depth = self._depth_regression(
+                        pts=points_inside_imgs[bid][cam_id],
+                        cam_feat=cam_feat[bid][cam_id], bev_feat=bev_feat[bid],
+                        lidar2camera=lidar2cams[bid][cam_id], raw_cam_K=raw_cam_K[cam_id])
+                    losses['depth'] += loss_depth
+                losses['depth'] *= n_sources  # will be divided by n_sources in the following
+
             losses = {key: loss / batch_size / n_sources / n_cams for key, loss in losses.items()}
             total_loss = sum([losses[key] * weight for key, weight in self._loss_weights.items()])
 
@@ -200,7 +219,7 @@ class NerfFusionHead(nn.Module):
         render_out_dict = self._render_rays_batch(
             raw_cam_K=raw_cam_K, source_inv_K=source_inv_K,
             lidar2camera=lidar2camera, source2input=source2input, cam_feat=cam_feat,
-            bev_feat=bev_feat, sampled_pixels=sampled_pixels)
+            bev_feat=bev_feat, sampled_pixels=sampled_pixels, source_img_size=self._source_img_size)
 
         depth_source_rendered = render_out_dict['depth']
         color_rendered = render_out_dict['color']
@@ -248,7 +267,7 @@ class NerfFusionHead(nn.Module):
         return ret
 
     def _render_rays_batch(self, raw_cam_K, source_inv_K, lidar2camera, source2input,
-                           cam_feat, bev_feat, sampled_pixels):
+                           cam_feat, bev_feat, sampled_pixels, source_img_size):
         depth_rendereds = []
         gaussian_means = []
         gaussian_stds = []
@@ -271,7 +290,8 @@ class NerfFusionHead(nn.Module):
             ret = self._batchify_depth_and_color(
                 source2input=source2input, cam_feat=cam_feat, bev_feat=bev_feat,
                 sampled_pixels_batch=sampled_pixels_batch, raw_cam_K=raw_cam_K,
-                source_inv_K=source_inv_K, lidar2camera=lidar2camera)
+                source_inv_K=source_inv_K, lidar2camera=lidar2camera,
+                source_img_size=source_img_size)
             color_rendereds.append(ret['color'])
             depth_rendereds.append(ret['depth'])
             ray_valid_ratios.append(ret['ray_valid_ratio'])
@@ -340,12 +360,12 @@ class NerfFusionHead(nn.Module):
         return loss_reprojections
 
     def _batchify_depth_and_color(self, source2input, cam_feat, bev_feat, sampled_pixels_batch,
-                                  raw_cam_K, source_inv_K, lidar2camera):
+                                  raw_cam_K, source_inv_K, lidar2camera, source_img_size):
         ret = {}
         n_rays = sampled_pixels_batch.shape[0]
         unit_direction = compute_direction_from_pixels(sampled_pixels_batch, source_inv_K)
         pts_uni, depth_volume_uni, sensor_distance_uni, viewdir = sample_rays_viewdir(
-            source_inv_K, source2input, self._source_img_size,
+            source_inv_K, source2input, source_img_size,
             sampling_method='uniform',
             sampled_pixels=sampled_pixels_batch,
             n_pts_per_ray=self._n_pts_uni,
@@ -370,7 +390,7 @@ class NerfFusionHead(nn.Module):
         depth_volume = torch.gather(depth_volume, 1, sorted_indices)
 
         densities, colors, ray_valid_ratio = self._predict(
-            mlp=self._mlp, pts=pts.detach(), viewdir=viewdir, cam_feat=cam_feat,
+            pts=pts.detach(), viewdir=viewdir, cam_feat=cam_feat,
             bev_feat=bev_feat, raw_cam_K=raw_cam_K, lidar2camera=lidar2camera)
         rendered_out = self._render_depth_and_color(densities, colors, sensor_distance, depth_volume)
         loss_kl, som_means, som_vars = self._ray_som(
@@ -406,7 +426,7 @@ class NerfFusionHead(nn.Module):
                                                      source2input)
         gaussian_means_pts_input = gaussian_means_pts_input.reshape(n_rays, self._n_gaussians, 3)
         output = self._predict(
-            mlp=self._mlp_gaussian, pts=gaussian_means_pts_input, viewdir=viewdir,
+            pts=gaussian_means_pts_input, viewdir=viewdir,
             cam_feat=cam_feat, bev_feat=bev_feat, raw_cam_K=raw_cam_K,
             lidar2camera=lidar2camera, output_type='offset')
         gaussian_means_offset = output[:, :, 0]
@@ -417,7 +437,7 @@ class NerfFusionHead(nn.Module):
         gaussian_stds_sensor_distance = torch.relu(gaussian_stds_offset + self._gaussian_std) + 1.5
         return gaussian_means_sensor_distance, gaussian_stds_sensor_distance
 
-    def _predict(self, mlp, pts, viewdir, cam_feat, bev_feat, raw_cam_K, lidar2camera,
+    def _predict(self, pts, viewdir, cam_feat, bev_feat, raw_cam_K, lidar2camera,
                  output_type='density'):
         saved_shape = pts.shape
         pts = pts.reshape(-1, 3)
@@ -436,16 +456,19 @@ class NerfFusionHead(nn.Module):
         viewdir_cam = viewdir @ lidar2camera[:3, :3].T
         viewdir = viewdir.unsqueeze(1).expand(-1, saved_shape[1], -1).reshape(-1, 3)
         viewdir_cam = viewdir_cam.unsqueeze(1).expand(-1, saved_shape[1], -1).reshape(-1, 3)
-        x_in = torch.cat([pts_bev_feat, pts_cam_feat, pe, viewdir, pe_cam, viewdir_cam], dim=-1)
 
         if output_type == 'density':
-            mlp_output = mlp(x_in)
-            color = torch.sigmoid(mlp_output[:, :3]).view(saved_shape[0], saved_shape[1], 3)
-            density = self._density_activation(mlp_output[:, 3:4]).view(
-                saved_shape[0], saved_shape[1])
+            color_in = torch.cat([pts_bev_feat, pts_cam_feat, pe, viewdir, pe_cam, viewdir_cam],
+                                 dim=-1)
+            density_in = torch.cat([pts_bev_feat, pts_cam_feat, pe, pe_cam], dim=-1)
+            color_output = self._mlp_color(color_in)
+            density_output = self._mlp_density(density_in)
+            color = torch.sigmoid(color_output).view(saved_shape[0], saved_shape[1], 3)
+            density = self._density_activation(density_output).view(saved_shape[0], saved_shape[1])
             return density, color, ray_valid_ratio
         elif output_type == 'offset':
-            mlp_output = mlp(x_in)
+            x_in = torch.cat([pts_bev_feat, pts_cam_feat, pe, viewdir, pe_cam, viewdir_cam], dim=-1)
+            mlp_output = self._mlp_gaussian(x_in)
             residual = mlp_output.view(saved_shape[0], saved_shape[1], 2)
             return residual
 
@@ -478,3 +501,25 @@ class NerfFusionHead(nn.Module):
             'weights': weights,
         }
         return ret
+
+    def _depth_regression(self, pts, cam_feat, bev_feat, lidar2camera, raw_cam_K):
+        pts_cam = cam_pts_2_cam_pts(pts, lidar2camera)
+        pts_cam = pts_cam[pts_cam[:, 2] <= self._max_sample_depth]
+
+        n_rays = min(self._n_rays_for_depth_reg, pts_cam.shape[0])
+        perm = torch.randperm(pts_cam.shape[0])
+        pts_cam = pts_cam[perm[:n_rays]]
+        pixels = cam_pts_2_pix(pts_cam, raw_cam_K)
+        depth = pts_cam[:, 2]
+        assert (pixels >= 0).all()
+
+        inv_K = torch.inverse(raw_cam_K)
+        camera2lidar = torch.inverse(lidar2camera)
+        render_out_dict = self._render_rays_batch(
+            raw_cam_K=raw_cam_K, source_inv_K=inv_K, lidar2camera=lidar2camera,
+            source2input=camera2lidar, cam_feat=cam_feat, bev_feat=bev_feat,
+            sampled_pixels=pixels, source_img_size=self._raw_img_size)
+
+        depth_rendered = render_out_dict['depth']
+        loss_depth = (depth - depth_rendered).abs().mean()
+        return loss_depth

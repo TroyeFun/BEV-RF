@@ -151,6 +151,17 @@ class FormatSourceTargetData:
 
 
 @PIPELINES.register_module()
+class FormatPointsInsideImages:
+
+    def __call__(self, results):
+        key = "points_inside_imgs"
+        # for img_id in range(len(results[key])):
+        #     results[key][img_id] = DC(results[key][img_id], stack=False)
+        results[key] = DC(results[key], stack=False)
+        return results
+
+
+@PIPELINES.register_module()
 class Collect3D:
     def __init__(
         self,

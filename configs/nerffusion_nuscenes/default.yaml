@@ -85,6 +85,8 @@ train_pipeline:
     pad_empty_sweeps: true
     remove_close: true
     load_augmented: ${load_augmented}
+  -
+    type: GetPointsInsideImages
   # -
   #   type: LoadAnnotations3D
   #   with_bbox_3d: true
@@ -170,17 +172,17 @@ train_pipeline:
     type: ImageNormalize
     mean: [0.485, 0.456, 0.406]
     std: [0.229, 0.224, 0.225]
-  - 
-    type: GridMask
-    use_h: true
-    use_w: true
-    max_epoch: ${max_epochs}
-    rotate: 1
-    offset: false
-    ratio: 0.5
-    mode: 1
-    prob: ${augment2d.gridmask.prob}
-    fixed_prob: ${augment2d.gridmask.fixed_prob}
+  # - 
+  #   type: GridMask
+  #   use_h: true
+  #   use_w: true
+  #   max_epoch: ${max_epochs}
+  #   rotate: 1
+  #   offset: false
+  #   ratio: 0.5
+  #   mode: 1
+  #   prob: ${augment2d.gridmask.prob}
+  #   fixed_prob: ${augment2d.gridmask.fixed_prob}
   -
     type: PointShuffle
   -
@@ -188,6 +190,8 @@ train_pipeline:
     classes: ${object_classes}
   -
     type: FormatSourceTargetData
+  -
+    type: FormatPointsInsideImages
   -
     type: Collect3D
     keys:
@@ -198,6 +202,7 @@ train_pipeline:
       - source_cam2input_lidars
       - source_cam2target_cams
       - source_camera_intrinsics
+      - points_inside_imgs
       # - gt_bboxes_3d
       # - gt_labels_3d
       # - gt_masks_bev
@@ -231,6 +236,8 @@ test_pipeline:
     pad_empty_sweeps: true
     remove_close: true
     load_augmented: ${load_augmented}
+  -
+    type: GetPointsInsideImages
   # -
   #   type: LoadAnnotations3D
   #   with_bbox_3d: true
@@ -270,6 +277,8 @@ test_pipeline:
   -
     type: FormatSourceTargetData
   -
+    type: FormatPointsInsideImages
+  -
     type: Collect3D
     keys:
       - img
@@ -279,6 +288,7 @@ test_pipeline:
       - source_cam2input_lidars
       - source_cam2target_cams
       - source_camera_intrinsics
+      - points_inside_imgs
       # - gt_bboxes_3d
       # - gt_labels_3d
       # - gt_masks_bev
