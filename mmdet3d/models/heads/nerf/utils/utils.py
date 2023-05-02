@@ -209,6 +209,8 @@ def sample_feats_2d(x_rgb, projected_pix, img_size):
     projected_pix: (N, 2),  (x, y)
     img_size: W, H
     """
+    mask = ((projected_pix[:, 0] >= 0) & (projected_pix[:, 0] <= img_size[0]) &
+            (projected_pix[:, 1] >= 0) & (projected_pix[:, 1] <= img_size[1]))
     projected_pix = (projected_pix / torch.tensor(img_size).type_as(projected_pix).reshape(1, 2)) * 2 - 1
     projected_pix = projected_pix.reshape(1, 1, -1, 2)
     feats_2d = F.grid_sample(
@@ -219,7 +221,8 @@ def sample_feats_2d(x_rgb, projected_pix, img_size):
         padding_mode="zeros"
     )  # (1, C, 1, n_pts)
     feats_2d = feats_2d.reshape(feats_2d.shape[1], -1).T
-    return feats_2d  # (n_pts, C)
+    feats_2d[~mask] = 0
+    return feats_2d, mask  # (n_pts, C)
 
 
 def sample_pix_from_img(img, pix):
@@ -328,6 +331,9 @@ def sample_feats_3d(voxel_feature, pts_3d, scene_range):
 
 def sample_bev_feat(bev_feat, pts_3d, scene_range):
     min_x, min_y, min_z, max_x, max_y, max_z = scene_range
+    mask = ((pts_3d[:, 0] >= min_x) & (pts_3d[:, 0] <= max_x) &
+            (pts_3d[:, 1] >= min_y) & (pts_3d[:, 1] <= max_y))
+
     min_xy = torch.Tensor([min_x, min_y]).type_as(pts_3d).unsqueeze(0)
     max_xy = torch.Tensor([max_x, max_y]).type_as(pts_3d).unsqueeze(0)
     grid = -1 + (pts_3d[:, :2] - min_xy) / (max_xy - min_xy) * 2
@@ -339,4 +345,5 @@ def sample_bev_feat(bev_feat, pts_3d, scene_range):
         mode='bilinear',
         padding_mode='zeros')  # (1, C, 1, N)
     feats_2d = feats_2d.reshape(feats_2d.shape[1], -1).T
-    return feats_2d
+    feats_2d[~mask] = 0
+    return feats_2d, mask
