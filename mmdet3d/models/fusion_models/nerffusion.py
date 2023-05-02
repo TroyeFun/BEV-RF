@@ -146,7 +146,6 @@ class NerfFusion(Base3DFusionModel):
         source_camera_intrinsics,
         source_cam2input_lidars,
         source_cam2target_cams,
-        points_inside_imgs,
         metas,
         **kwargs,
     ):
@@ -169,7 +168,6 @@ class NerfFusion(Base3DFusionModel):
                 source_camera_intrinsics,
                 source_cam2input_lidars,
                 source_cam2target_cams,
-                points_inside_imgs,
                 metas,
                 **kwargs,
             )
@@ -193,7 +191,6 @@ class NerfFusion(Base3DFusionModel):
         source_camera_intrinsics,
         source_cam2input_lidars,
         source_cam2target_cams,
-        points_inside_imgs,
         metas,
     ):
         cam_feat = None
@@ -220,7 +217,7 @@ class NerfFusion(Base3DFusionModel):
                 source_imgs=source_imgs, target_imgs=target_imgs,
                 raw_cam_Ks=camera_intrinsics, source_cam_Ks=source_camera_intrinsics,
                 lidar2cams=lidar2camera, source_cam2input_lidars=source_cam2input_lidars,
-                source_cam2target_cams=source_cam2target_cams, points_inside_imgs=points_inside_imgs)
+                source_cam2target_cams=source_cam2target_cams, points=points)
             for name, val in losses.items():
                 outputs[f"stats/nerf/{name}"] = val
             return outputs
@@ -230,5 +227,5 @@ class NerfFusion(Base3DFusionModel):
                 source_imgs=source_imgs, target_imgs=target_imgs,
                 raw_cam_Ks=camera_intrinsics, source_cam_Ks=source_camera_intrinsics,
                 lidar2cams=lidar2camera, source_cam2input_lidars=source_cam2input_lidars,
-                source_cam2target_cams=source_cam2target_cams, points_inside_imgs=points_inside_imgs)
+                source_cam2target_cams=source_cam2target_cams, points=points)
             return outputs

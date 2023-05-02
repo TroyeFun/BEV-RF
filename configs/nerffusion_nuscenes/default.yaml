@@ -85,8 +85,8 @@ train_pipeline:
     pad_empty_sweeps: true
     remove_close: true
     load_augmented: ${load_augmented}
-  -
-    type: GetPointsInsideImages
+  # -
+  #   type: GetPointsInsideImages
   # -
   #   type: LoadAnnotations3D
   #   with_bbox_3d: true
@@ -190,8 +190,8 @@ train_pipeline:
     classes: ${object_classes}
   -
     type: FormatSourceTargetData
-  -
-    type: FormatPointsInsideImages
+  # -
+  #   type: FormatPointsInsideImages
   -
     type: Collect3D
     keys:
@@ -202,7 +202,7 @@ train_pipeline:
       - source_cam2input_lidars
       - source_cam2target_cams
       - source_camera_intrinsics
-      - points_inside_imgs
+      # - points_inside_imgs
       # - gt_bboxes_3d
       # - gt_labels_3d
       # - gt_masks_bev
@@ -236,8 +236,8 @@ test_pipeline:
     pad_empty_sweeps: true
     remove_close: true
     load_augmented: ${load_augmented}
-  -
-    type: GetPointsInsideImages
+  # -
+  #   type: GetPointsInsideImages
   # -
   #   type: LoadAnnotations3D
   #   with_bbox_3d: true
@@ -276,8 +276,8 @@ test_pipeline:
     classes: ${object_classes}
   -
     type: FormatSourceTargetData
-  -
-    type: FormatPointsInsideImages
+  # -
+  #   type: FormatPointsInsideImages
   -
     type: Collect3D
     keys:
@@ -288,7 +288,7 @@ test_pipeline:
       - source_cam2input_lidars
       - source_cam2target_cams
       - source_camera_intrinsics
-      - points_inside_imgs
+      # - points_inside_imgs
       # - gt_bboxes_3d
       # - gt_labels_3d
       # - gt_masks_bev

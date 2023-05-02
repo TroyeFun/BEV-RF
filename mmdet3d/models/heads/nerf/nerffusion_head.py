@@ -110,7 +110,7 @@ class NerfFusionHead(nn.Module):
 
     @force_fp32()
     def forward(self, cam_feat, bev_feat, source_imgs, target_imgs, raw_cam_Ks, source_cam_Ks,
-                lidar2cams, source_cam2input_lidars, source_cam2target_cams, points_inside_imgs):
+                lidar2cams, source_cam2input_lidars, source_cam2target_cams, points):
         """
         Args:
             'cam_feat': (B, n_cam, C, H, W)
@@ -122,7 +122,7 @@ class NerfFusionHead(nn.Module):
             'lidar2cams': lidar to camera extrinsics, (B, n_cam, 4, 4)
             'source_cam2input_lidars': List[B * (n_sources, n_cam, 4, 4)]
             'source_cam2target_cams': List[B * (n_sources, n_cam, 4, 4)]
-            'points_inside_imgs': List[B * List[n_cam * (n_pts, 3)]]
+            'points': List[B * (n_pts, pcd_dim)]
         """
         if isinstance(bev_feat, (list, tuple)):
             bev_feat = bev_feat[0]
@@ -184,7 +184,7 @@ class NerfFusionHead(nn.Module):
             if 'depth' in self._loss_weights:
                 for cam_id in range(n_cams):
                     loss_depth = self._depth_regression(
-                        pts=points_inside_imgs[bid][cam_id],
+                        pts=points[bid][:, :3],
                         cam_feat=cam_feat[bid][cam_id], bev_feat=bev_feat[bid],
                         lidar2camera=lidar2cams[bid][cam_id], raw_cam_K=raw_cam_K[cam_id])
                     losses['depth'] += loss_depth
@@ -504,14 +504,20 @@ class NerfFusionHead(nn.Module):
 
     def _depth_regression(self, pts, cam_feat, bev_feat, lidar2camera, raw_cam_K):
         pts_cam = cam_pts_2_cam_pts(pts, lidar2camera)
-        pts_cam = pts_cam[pts_cam[:, 2] <= self._max_sample_depth]
+        mask = (pts_cam[:, 2] > 0) & (pts_cam[:, 2] <= self._max_sample_depth)
+        pts_cam = pts_cam[mask]
 
-        n_rays = min(self._n_rays_for_depth_reg, pts_cam.shape[0])
-        perm = torch.randperm(pts_cam.shape[0])
-        pts_cam = pts_cam[perm[:n_rays]]
         pixels = cam_pts_2_pix(pts_cam, raw_cam_K)
+        mask = ((pixels[:, 0] >= 0) & (pixels[:, 0] < self._raw_img_size[0]) &
+                (pixels[:, 1] >= 0) & (pixels[:, 1] < self._raw_img_size[1]))
+        pixels = pixels[mask]
+        pts_cam = pts_cam[mask]
+
+        n_rays = min(self._n_rays_for_depth_reg, pixels.shape[0])
+        perm = torch.randperm(pixels.shape[0])
+        pixels = pixels[perm[:n_rays]]
+        pts_cam = pts_cam[perm[:n_rays]]
         depth = pts_cam[:, 2]
-        assert (pixels >= 0).all()
 
         inv_K = torch.inverse(raw_cam_K)
         camera2lidar = torch.inverse(lidar2camera)

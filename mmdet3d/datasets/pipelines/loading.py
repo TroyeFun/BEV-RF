@@ -588,8 +588,8 @@ class GetPointsInsideImages(object):
             pts_cam = pts_cam[mask1]
             homo_pts = pts_cam / pts_cam[:, 2:3]
             pixels = homo_pts @ cam_K.T
-            mask2 = ((pixels[:, 0] > 1) & (pixels[:, 0] < img.size[0] - 1) &
-                     (pixels[:, 1] > 1) & (pixels[:, 1] < img.size[1] - 1))
+            mask2 = ((pixels[:, 0] >= 0) & (pixels[:, 0] <= img.size[0]) &
+                     (pixels[:, 1] >= 0) & (pixels[:, 1] <= img.size[1]))
             points_inside_imgs.append(points[mask1][mask2].clone())
         results["points_inside_imgs"] = points_inside_imgs
         return results
