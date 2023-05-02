@@ -33,8 +33,8 @@ def nerf_single_gpu_test(model, data_loader, save_dir):
         with torch.no_grad():
             result = model(**data)
 
-        import ipdb; ipdb.set_trace()
-        if i < 100:
+        # import ipdb; ipdb.set_trace()
+        if i < 1000:
             vis_path = osp.join(save_dir, 'vis', f'{i}.png')
             visualize_results(data, result, vis_path)
         results.extend(result)

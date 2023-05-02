@@ -156,7 +156,9 @@ def visualize_results(input_batch, result, save_path):
     n_cols = 4
 
     plt.clf()
-    fig = plt.figure(figsize=(10 * n_cols, 10 * n_imgs))
+    fig = plt.figure(figsize=(10 * n_cols, 4 * n_imgs), dpi=72)
+    fig.tight_layout(pad=0.1, w_pad=0.1, h_pad=0.1)
+    plt.subplots_adjust(left=0.05, bottom=0.05, right=0.95, top=0.95, hspace=0.1)
     for bid in range(bs):
         for sid in range(n_sources):
             for cid in range(n_cams):
@@ -170,4 +172,4 @@ def visualize_results(input_batch, result, save_path):
                 ax3 = fig.add_subplot(n_imgs, n_cols, img_id * n_cols + 4)
                 ax3.imshow(depth_rendered[bid][sid][cid].cpu().numpy(), cmap='rainbow_r')
     plt.savefig(save_path)
-    plt.show()
+    # plt.show()
