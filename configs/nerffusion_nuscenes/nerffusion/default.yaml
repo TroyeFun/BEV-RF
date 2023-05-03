@@ -7,19 +7,22 @@ model:
       dim_bev_feat: 512
       dim_cam_feat: 771  # 256 + 256 + 256 + 3 (laterals * 3 + raw_img)
       n_rays: 600
+      n_rays_for_depth_reg: 1200
+      ray_batch_size: 600
       n_pts_uni: 32
       n_gaussians: 4
       n_pts_per_gaussian: 8
       gaussian_std: 2.5
-      n_rays_for_depth_reg: 1200
       max_sample_depth: 100
       som_sigma: 2.0
       scene_range: ${point_cloud_range}  # [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
       raw_img_size: ${raw_img_size}
       source_img_size: ${source_img_size}
+      n_mlp_blocks: 4
+      n_mlp_hidden: 256
       loss_weights:
         kl: 1
         dist2closest: 0.01
         color: 1
         reprojection: 1
-        depth: 0.1
+        depth: 0.01

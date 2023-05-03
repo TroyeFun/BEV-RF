@@ -55,6 +55,7 @@ class NerfFusionHead(nn.Module):
             dim_cam_feat=256,
             n_rays=1200,
             n_rays_for_depth_reg=1200,
+            ray_batch_size=600,
             n_pts_uni=32,
             n_gaussians=4,
             n_pts_per_gaussian=8,
@@ -64,6 +65,8 @@ class NerfFusionHead(nn.Module):
             scene_range=(-51.2, -51.2, -5.0, 51.2, 51.2, 3.0),
             raw_img_size=(1600, 900),
             source_img_size=(800, 300),
+            n_mlp_blocks=3,
+            n_mlp_hidden=256,
             loss_weights=None,
     ) -> None:
         super().__init__()
@@ -73,7 +76,7 @@ class NerfFusionHead(nn.Module):
 
         self._n_rays = n_rays
         self._n_rays_for_depth_reg = n_rays_for_depth_reg
-        self._ray_batch_size = max(self._n_rays, self._n_rays_for_depth_reg)
+        self._ray_batch_size = ray_batch_size
         self._n_pts_uni = n_pts_uni
         self._n_gaussians = n_gaussians
         self._n_pts_per_gaussian = n_pts_per_gaussian
@@ -88,15 +91,15 @@ class NerfFusionHead(nn.Module):
         self._mlp_color = ResnetFC(
             d_in=(39 + 3) * 2,  # positional_encoding + ray_direction
             d_out=3,
-            n_blocks=3,
-            d_hidden=256,
+            n_blocks=n_mlp_blocks,
+            d_hidden=n_mlp_hidden,
             d_latent=dim_bev_feat + dim_cam_feat,
         )
         self._mlp_density = ResnetFC(
             d_in=39 * 2,  # positional_encoding only
             d_out=1,
-            n_blocks=3,
-            d_hidden=256,
+            n_blocks=n_mlp_blocks,
+            d_hidden=n_mlp_hidden,
             d_latent=dim_bev_feat + dim_cam_feat,
         )
         self._mlp_gaussian = ResnetFC(
