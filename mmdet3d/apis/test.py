@@ -59,7 +59,7 @@ def nerf_multi_gpu_test(model, data_loader, save_dir):
         with torch.no_grad():
             result = model(**data)
         
-        vis_path = osp.join(save_dir, 'vis', f'{rank}_{i}.png')
+        vis_path = osp.join(save_dir, 'vis', f'{i * world_size + rank}.png')
         visualize_results(data, result, vis_path)
 
         results.extend(result)
