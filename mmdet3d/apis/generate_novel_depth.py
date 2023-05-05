@@ -15,8 +15,8 @@ import torch
 from test_utils import visualize_novel_views, create_novel_views_dir
 
 # NOVEL_IMG_SIZE = (800, 300)
-NOVEL_IMG_SIZE = (400, 150)
-FOV_H, FOV_V = np.pi * 60 / 180, np.pi * 30 / 180  # 120 degree horizontal FOV, 60 degree vertical FOV
+NOVEL_IMG_SIZE = (800, 300)
+FOV_H, FOV_V = np.pi * 60 / 180, np.pi * 20 / 180  # 120 degree horizontal FOV, 60 degree vertical FOV
 NOVEL_CAM_K = np.array([
     [NOVEL_IMG_SIZE[0] / 2 / np.sqrt(np.tan(FOV_H / 2)), 0, NOVEL_IMG_SIZE[0] / 2],
     [0, NOVEL_IMG_SIZE[1] / 2 / np.sqrt(np.tan(FOV_V / 2)), NOVEL_IMG_SIZE[1] / 2],
@@ -53,11 +53,12 @@ def sample_novel_cam_poses():
         return poses
 
     forward_front_cams = _generate_cam_poses(forward_trans, lidar2front_cam, front_rads)
-    center_front_cams = _generate_cam_poses(0, lidar2front_cam, front_rads)
-    center_back_cams = _generate_cam_poses(0, lidar2back_cam, back_rads)
+    center_front_cams = _generate_cam_poses(0.5, lidar2front_cam, front_rads)
+    center_back_cams = _generate_cam_poses(-0.5, lidar2back_cam, back_rads)
     backward_back_cams = _generate_cam_poses(-forward_trans, lidar2back_cam, back_rads)
     # cam_poses = forward_front_cams + center_front_cams + center_back_cams + backward_back_cams
-    cam_poses = forward_front_cams + backward_back_cams
+    # cam_poses = forward_front_cams + backward_back_cams
+    cam_poses = center_front_cams + center_back_cams
     cam_poses = np.stack(cam_poses)
     return cam_poses
 
