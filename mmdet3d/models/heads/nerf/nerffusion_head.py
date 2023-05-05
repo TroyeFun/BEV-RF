@@ -249,7 +249,8 @@ class NerfFusionHead(nn.Module):
         min_som_vars = torch.gather(som_vars, 1, gaussian_idx.unsqueeze(-1))
 
         sampled_color_source = sample_pix_from_img(source_img, sampled_pixels)
-        loss_color = torch.abs(sampled_color_source.T - color_rendered) * ray_valid_ratio.unsqueeze(1)
+        ray_loss_weight = (ray_valid_ratio.unsqueeze(1) > 0.95).float()
+        loss_color = torch.abs(sampled_color_source.T - color_rendered) * ray_loss_weight
 
         loss_reprojection = self._compute_reprojection_loss(
             sampled_pixels, sampled_color_source, depth_source_rendered,
