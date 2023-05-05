@@ -7,7 +7,7 @@ model:
       dim_bev_feat: 512
       dim_cam_feat: 771  # 256 + 256 + 256 + 3 (laterals * 3 + raw_img)
       n_rays: 300
-      n_rays_for_depth_reg: 1200
+      n_rays_for_depth_reg: 600
       ray_batch_size: 1200
       n_pts_uni: 64
       n_gaussians: 16

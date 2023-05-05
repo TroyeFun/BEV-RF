@@ -87,7 +87,7 @@ def log_sampling(d_min, d_max, unit_direction):
 
 def sample_rays_viewdir(
         inv_K, T_cam2cam,
-        img_size,
+        img_size=None,
         sampling_method="uniform",  # uniform, log
         sampled_pixels=None,
         max_sample_depth=80,
@@ -347,3 +347,28 @@ def sample_bev_feat(bev_feat, pts_3d, scene_range):
     feats_2d = feats_2d.reshape(feats_2d.shape[1], -1).T
     feats_2d[~mask] = 0
     return feats_2d, mask
+
+
+def sample_feats_from_multi_cam(multi_cam_feat, pixels, pts_cam_id, img_size):
+    """
+    Args:
+        multi_cam_feat (n_cams, C, H, W)
+        pixels (N, 2)
+        pts_cam_id (N, )
+        img_size (List): [H, W]
+    """
+    n_cams, C, H, W = multi_cam_feat.shape
+    mask = ((pixels[:, 0] >= 0) & (pixels[:, 0] < img_size[0]) &
+            (pixels[:, 1] >= 0) & (pixels[:, 1] < img_size[1]))
+    pixel_and_cam_ids = torch.cat([pixels, pts_cam_id.unsqueeze(-1).float() + 0.5], dim=-1)
+    max_xyz = torch.tensor([img_size[0], img_size[1], n_cams]).type_as(pixels).unsqueeze(0)
+    grid = -1 + pixel_and_cam_ids / max_xyz * 2
+    feats = F.grid_sample(
+        multi_cam_feat.permute(1, 0, 2, 3).unsqueeze(0),  # (B, C, n_cams, H, W)
+        grid.reshape(1, 1, 1, -1, 3),  # (B, D', H', W', 3)
+        align_corners=False,
+        mode='bilinear',
+        padding_mode='zeros')  # (1, C, 1, 1, n_pts)
+    feats = feats.reshape(feats.shape[1], -1).T  # (n_pts, C)
+    feats[~mask] = 0
+    return feats, mask

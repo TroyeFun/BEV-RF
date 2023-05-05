@@ -1,5 +1,7 @@
 import os
+import os.path as osp
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import open3d as o3d
@@ -172,4 +174,51 @@ def visualize_results(input_batch, result, save_path):
                 ax3 = fig.add_subplot(n_imgs, n_cols, img_id * n_cols + 4)
                 ax3.imshow(depth_rendered[bid][sid][cid].cpu().numpy(), cmap='rainbow_r')
     plt.savefig(save_path)
+    # plt.show()
+
+
+def create_novel_views_dir(save_dir):
+    vis_dir = osp.join(save_dir, 'vis')
+    color_dir = osp.join(save_dir, 'color')
+    depth_dir = osp.join(save_dir, 'depth')
+    valid_ray_dir = osp.join(save_dir, 'valid_ray')
+    os.makedirs(vis_dir, exist_ok=True)
+    os.makedirs(color_dir, exist_ok=True)
+    os.makedirs(depth_dir, exist_ok=True)
+    os.makedirs(valid_ray_dir, exist_ok=True)
+
+
+def visualize_novel_views(input_batch, result, save_dir, index):
+    input_imgs = input_batch['img'].data[0][0]
+    input_imgs = (input_imgs - input_imgs.min()) / (input_imgs.max() - input_imgs.min())
+    input_imgs = input_imgs.permute(0, 2, 3, 1).cpu().numpy()
+    colors = result['colors'].cpu().numpy()
+    depths = result['depths'].cpu().numpy()
+    ray_valid_ratios = result['ray_valid_ratios'].cpu().numpy()
+
+    n_input = input_imgs.shape[0]
+    n_novel = colors.shape[0]
+    n_cols = 3
+    n_rows = 2 + n_novel
+
+    plt.clf()
+    fig = plt.figure(figsize=(10 * n_cols, 4 * n_rows), dpi=72)
+    fig.tight_layout(pad=0.1, w_pad=0.1, h_pad=0.1)
+    plt.subplots_adjust(left=0.05, bottom=0.05, right=0.95, top=0.95, hspace=0.1)
+    for i in range(n_input):
+        ax = fig.add_subplot(n_rows, n_cols, i + 1)
+        ax.imshow(input_imgs[i])
+
+    for i in range(n_novel):
+        ax = fig.add_subplot(n_rows, n_cols, 6 + i * 3 + 1)
+        ax.imshow(colors[i])
+        ax = fig.add_subplot(n_rows, n_cols, 6 + i * 3 + 2)
+        ax.imshow(depths[i], cmap='rainbow_r')
+        ax = fig.add_subplot(n_rows, n_cols, 6 + i * 3 + 3)
+        ax.imshow(ray_valid_ratios[i], cmap='rainbow_r')
+        plt.imsave(osp.join(save_dir, 'color', f'{index:05d}_{i:02d}.png'), colors[i])
+        np.save(osp.join(save_dir, 'depth', f'{index:05d}_{i:02d}.npy'), depths[i])
+        np.save(osp.join(save_dir, 'valid_ray', f'{index:05d}_{i:02d}.npy'), ray_valid_ratios[i])
+
+    plt.savefig(osp.join(save_dir, 'vis', f'{index:05d}.png'))
     # plt.show()

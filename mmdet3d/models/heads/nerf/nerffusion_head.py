@@ -11,7 +11,8 @@ from mmcv.runner import auto_fp16, force_fp32
 from mmdet3d.models.builder import HEADS
 from mmdet3d.models.heads.nerf.utils import (PositionalEncoding, ResnetFC, RaySOM,
     sample_pix_from_img, compute_direction_from_pixels, sample_rays_viewdir, sample_rays_gaussian,
-    cam_pts_2_cam_pts, cam_pts_2_pix, sample_bev_feat, pix_2_cam_pts, sample_feats_2d)
+    cam_pts_2_cam_pts, cam_pts_2_pix, sample_bev_feat, pix_2_cam_pts, sample_feats_2d,
+    sample_feats_from_multi_cam)
 
 
 __all__ = ["NerfFusionHead"]
@@ -110,6 +111,10 @@ class NerfFusionHead(nn.Module):
             d_latent=dim_bev_feat + dim_cam_feat,
         )
         self._ray_som = RaySOM(som_sigma=som_sigma)
+        self._inference_mode = False
+
+    def set_inference_mode(self, mode):
+        self._inference_mode = mode
 
     @force_fp32()
     def forward(self, cam_feat, bev_feat, source_imgs, target_imgs, raw_cam_Ks, source_cam_Ks,
@@ -222,7 +227,7 @@ class NerfFusionHead(nn.Module):
         render_out_dict = self._render_rays_batch(
             raw_cam_K=raw_cam_K, source_inv_K=source_inv_K,
             lidar2camera=lidar2camera, source2input=source2input, cam_feat=cam_feat,
-            bev_feat=bev_feat, sampled_pixels=sampled_pixels, source_img_size=self._source_img_size)
+            bev_feat=bev_feat, sampled_pixels=sampled_pixels)
 
         depth_source_rendered = render_out_dict['depth']
         color_rendered = render_out_dict['color']
@@ -270,7 +275,7 @@ class NerfFusionHead(nn.Module):
         return ret
 
     def _render_rays_batch(self, raw_cam_K, source_inv_K, lidar2camera, source2input,
-                           cam_feat, bev_feat, sampled_pixels, source_img_size):
+                           cam_feat, bev_feat, sampled_pixels):
         depth_rendereds = []
         gaussian_means = []
         gaussian_stds = []
@@ -293,8 +298,7 @@ class NerfFusionHead(nn.Module):
             ret = self._batchify_depth_and_color(
                 source2input=source2input, cam_feat=cam_feat, bev_feat=bev_feat,
                 sampled_pixels_batch=sampled_pixels_batch, raw_cam_K=raw_cam_K,
-                source_inv_K=source_inv_K, lidar2camera=lidar2camera,
-                source_img_size=source_img_size)
+                source_inv_K=source_inv_K, lidar2camera=lidar2camera)
             color_rendereds.append(ret['color'])
             depth_rendereds.append(ret['depth'])
             ray_valid_ratios.append(ret['ray_valid_ratio'])
@@ -363,12 +367,12 @@ class NerfFusionHead(nn.Module):
         return loss_reprojections
 
     def _batchify_depth_and_color(self, source2input, cam_feat, bev_feat, sampled_pixels_batch,
-                                  raw_cam_K, source_inv_K, lidar2camera, source_img_size):
+                                  raw_cam_K, source_inv_K, lidar2camera):
         ret = {}
         n_rays = sampled_pixels_batch.shape[0]
         unit_direction = compute_direction_from_pixels(sampled_pixels_batch, source_inv_K)
         pts_uni, depth_volume_uni, sensor_distance_uni, viewdir = sample_rays_viewdir(
-            source_inv_K, source2input, source_img_size,
+            source_inv_K, source2input, None,
             sampling_method='uniform',
             sampled_pixels=sampled_pixels_batch,
             n_pts_per_ray=self._n_pts_uni,
@@ -392,9 +396,10 @@ class NerfFusionHead(nn.Module):
         pts = torch.gather(pts, 1, sorted_indices.unsqueeze(-1).expand(-1, -1, 3))
         depth_volume = torch.gather(depth_volume, 1, sorted_indices)
 
-        densities, colors, ray_valid_ratio = self._predict(
+        mlp_input = self._get_mlp_input(
             pts=pts.detach(), viewdir=viewdir, cam_feat=cam_feat,
             bev_feat=bev_feat, raw_cam_K=raw_cam_K, lidar2camera=lidar2camera)
+        densities, colors, ray_valid_ratio = self._predict(mlp_input)
         rendered_out = self._render_depth_and_color(densities, colors, sensor_distance, depth_volume)
         loss_kl, som_means, som_vars = self._ray_som(
             gaussian_means_sensor_distance, gaussian_stds_sensor_distance, sensor_distance,
@@ -428,10 +433,10 @@ class NerfFusionHead(nn.Module):
         gaussian_means_pts_input = cam_pts_2_cam_pts(gaussian_means_pts.reshape(-1, 3),
                                                      source2input)
         gaussian_means_pts_input = gaussian_means_pts_input.reshape(n_rays, self._n_gaussians, 3)
-        output = self._predict(
-            pts=gaussian_means_pts_input, viewdir=viewdir,
-            cam_feat=cam_feat, bev_feat=bev_feat, raw_cam_K=raw_cam_K,
-            lidar2camera=lidar2camera, output_type='offset')
+        mlp_input = self._get_mlp_input(
+            pts=gaussian_means_pts_input, viewdir=viewdir, cam_feat=cam_feat, bev_feat=bev_feat,
+            raw_cam_K=raw_cam_K, lidar2camera=lidar2camera)
+        output = self._predict(mlp_input, output_type='offset')
         gaussian_means_offset = output[:, :, 0]
         gaussian_stds_offset = output[:, :, 1]
         gaussian_means_sensor_distance = gaussian_means_sensor_distance.squeeze(
@@ -440,9 +445,43 @@ class NerfFusionHead(nn.Module):
         gaussian_stds_sensor_distance = torch.relu(gaussian_stds_offset + self._gaussian_std) + 1.5
         return gaussian_means_sensor_distance, gaussian_stds_sensor_distance
 
-    def _predict(self, pts, viewdir, cam_feat, bev_feat, raw_cam_K, lidar2camera,
-                 output_type='density'):
-        saved_shape = pts.shape
+    def _predict(self, mlp_input, output_type='density'):
+        n_rays = mlp_input['n_rays']
+        n_pts_per_ray = mlp_input['n_pts_per_ray']
+        pts_bev_feat = mlp_input['pts_bev_feat']
+        pts_cam_feat = mlp_input['pts_cam_feat']
+        pe = mlp_input['pe']
+        viewdir = mlp_input['viewdir']
+        pe_cam = mlp_input['pe_cam']
+        viewdir_cam = mlp_input['viewdir_cam']
+        ray_valid_ratio = mlp_input['ray_valid_ratio']
+
+        if output_type == 'density':
+            color_in = torch.cat([pts_bev_feat, pts_cam_feat, pe, viewdir, pe_cam, viewdir_cam],
+                                 dim=-1)
+            density_in = torch.cat([pts_bev_feat, pts_cam_feat, pe, pe_cam], dim=-1)
+            color_output = self._mlp_color(color_in)
+            density_output = self._mlp_density(density_in)
+            color = torch.sigmoid(color_output).view(n_rays, n_pts_per_ray, 3)
+            density = self._density_activation(density_output).view(n_rays, n_pts_per_ray)
+            return density, color, ray_valid_ratio
+        elif output_type == 'offset':
+            x_in = torch.cat([pts_bev_feat, pts_cam_feat, pe, viewdir, pe_cam, viewdir_cam], dim=-1)
+            mlp_output = self._mlp_gaussian(x_in)
+            residual = mlp_output.view(n_rays, n_pts_per_ray, 2)
+            return residual
+
+    def _get_mlp_input(self, pts, viewdir, cam_feat, bev_feat, raw_cam_K, lidar2camera):
+        if self._inference_mode:
+            return self._get_mlp_input_from_multi_cam(pts, viewdir, cam_feat, bev_feat,
+                                                      raw_cam_K, lidar2camera)
+        else:
+            return self._get_mlp_input_from_single_cam(pts, viewdir, cam_feat, bev_feat,
+                                                       raw_cam_K, lidar2camera)
+
+    def _get_mlp_input_from_single_cam(self, pts, viewdir, cam_feat, bev_feat, raw_cam_K,
+                                       lidar2camera):
+        n_rays, n_pts_per_ray, _ = pts.shape
         pts = pts.reshape(-1, 3)
         pts_bev_feat, mask_bev = sample_bev_feat(bev_feat, pts, self._scene_range)
 
@@ -451,29 +490,85 @@ class NerfFusionHead(nn.Module):
         pts_cam_feat, mask_cam = sample_feats_2d(cam_feat, pixels, img_size=self._raw_img_size)
 
         # get valid rays
-        mask = (mask_bev | mask_cam).view(saved_shape[0], saved_shape[1])
+        mask = (mask_bev | mask_cam).view(n_rays, n_pts_per_ray)
         ray_valid_ratio = mask.float().mean(dim=1)
 
         pe = self._positional_encoding(pts)
         pe_cam = self._positional_encoding(cam_pts)
         viewdir_cam = viewdir @ lidar2camera[:3, :3].T
-        viewdir = viewdir.unsqueeze(1).expand(-1, saved_shape[1], -1).reshape(-1, 3)
-        viewdir_cam = viewdir_cam.unsqueeze(1).expand(-1, saved_shape[1], -1).reshape(-1, 3)
+        viewdir = viewdir.unsqueeze(1).expand(-1, n_pts_per_ray, -1).reshape(-1, 3)
+        viewdir_cam = viewdir_cam.unsqueeze(1).expand(-1, n_pts_per_ray, -1).reshape(-1, 3)
 
-        if output_type == 'density':
-            color_in = torch.cat([pts_bev_feat, pts_cam_feat, pe, viewdir, pe_cam, viewdir_cam],
-                                 dim=-1)
-            density_in = torch.cat([pts_bev_feat, pts_cam_feat, pe, pe_cam], dim=-1)
-            color_output = self._mlp_color(color_in)
-            density_output = self._mlp_density(density_in)
-            color = torch.sigmoid(color_output).view(saved_shape[0], saved_shape[1], 3)
-            density = self._density_activation(density_output).view(saved_shape[0], saved_shape[1])
-            return density, color, ray_valid_ratio
-        elif output_type == 'offset':
-            x_in = torch.cat([pts_bev_feat, pts_cam_feat, pe, viewdir, pe_cam, viewdir_cam], dim=-1)
-            mlp_output = self._mlp_gaussian(x_in)
-            residual = mlp_output.view(saved_shape[0], saved_shape[1], 2)
-            return residual
+        mlp_input = {
+            'n_rays': n_rays,
+            'n_pts_per_ray': n_pts_per_ray,
+            'pts_bev_feat': pts_bev_feat,
+            'pts_cam_feat': pts_cam_feat,
+            'pe': pe,
+            'pe_cam': pe_cam,
+            'viewdir': viewdir,
+            'viewdir_cam': viewdir_cam,
+            'ray_valid_ratio': ray_valid_ratio
+        }
+        return mlp_input
+
+    def _get_mlp_input_from_multi_cam(self, pts, viewdir, multi_cam_feat, bev_feat, raw_cam_Ks,
+                                      lidar2cams):
+        n_rays, n_pts_per_ray, _ = pts.shape  # (n_rays, n_pts_per_ray, 3)
+        n_cams = len(lidar2cams)
+        pts = pts.reshape(-1, 3)
+        pts_bev_feat, mask_bev = sample_bev_feat(bev_feat, pts, self._scene_range)
+
+        pts_in_all_cams = []
+        viewdir_in_all_cams = []
+        pixels_in_all_cams = []
+        masks_in_all_cams = []
+        for cam_id in range(n_cams):
+            cam_pts = cam_pts_2_cam_pts(pts, lidar2cams[cam_id])
+            viewdir_cam = viewdir @ lidar2cams[cam_id][:3, :3].T
+            pixels = cam_pts_2_pix(cam_pts, raw_cam_Ks[cam_id])
+            mask = ((pixels[:, 0] >= 0) & (pixels[:, 0] < self._raw_img_size[0]) &
+                    (pixels[:, 1] >= 0) & (pixels[:, 1] < self._raw_img_size[1]))
+            pts_in_all_cams.append(cam_pts)
+            viewdir_in_all_cams.append(viewdir_cam)
+            pixels_in_all_cams.append(pixels)
+            masks_in_all_cams.append(mask)
+        pts_in_all_cams = torch.stack(pts_in_all_cams)  # (n_cams, n_pts, 3)
+        viewdir_in_all_cams = torch.stack(viewdir_in_all_cams)  # (n_cams, n_pts, 3)
+        pixels_in_all_cams = torch.stack(pixels_in_all_cams)  # (n_cams, n_pts, 2)
+        masks_in_all_cams = torch.stack(masks_in_all_cams)  # (n_cams, n_pts)
+
+        pts_cam_id = masks_in_all_cams.float().argmax(dim=0) # (n_pts,)
+        pixels = torch.gather(pixels_in_all_cams, 0,
+                              pts_cam_id.reshape(1, -1, 1).expand(-1, -1, 2)).squeeze(0)  # (n_pts, 2)
+        pts_cam_feat, mask_cam = sample_feats_from_multi_cam(
+            multi_cam_feat, pixels, pts_cam_id, self._raw_img_size)  # (n_pts, C)
+
+        # get valid rays
+        mask = (mask_bev | mask_cam).view(n_rays, n_pts_per_ray)
+        ray_valid_ratio = mask.float().mean(dim=1)
+
+        cam_pts = torch.gather(pts_in_all_cams, 0,
+                               pts_cam_id.reshape(1, -1, 1).expand(-1, -1, 3)).squeeze(0)  # (n_pts, 3)
+        viewdir_in_all_cams = viewdir_in_all_cams.unsqueeze(2).expand(-1, -1, n_pts_per_ray, -1)
+        viewdir_in_all_cams = viewdir_in_all_cams.reshape(n_cams, -1, 3)
+        viewdir_cam = torch.gather(viewdir_in_all_cams, 0,
+                                   pts_cam_id.reshape(1, -1, 1).expand(-1, -1, 3)).squeeze(0)  # (n_pts, 3)
+        pe = self._positional_encoding(pts)
+        pe_cam = self._positional_encoding(cam_pts)
+        viewdir = viewdir.unsqueeze(1).expand(-1, n_pts_per_ray, -1).reshape(-1, 3)
+        mlp_input = {
+            'n_rays': n_rays,
+            'n_pts_per_ray': n_pts_per_ray,
+            'pts_bev_feat': pts_bev_feat,
+            'pts_cam_feat': pts_cam_feat,
+            'pe': pe,
+            'pe_cam': pe_cam,
+            'viewdir': viewdir,
+            'viewdir_cam': viewdir_cam,
+            'ray_valid_ratio': ray_valid_ratio,
+        }
+        return mlp_input
 
     def _density_activation(self, density_logit):
         return F.softplus(density_logit - 1, beta=1)
@@ -526,9 +621,58 @@ class NerfFusionHead(nn.Module):
         camera2lidar = torch.inverse(lidar2camera)
         render_out_dict = self._render_rays_batch(
             raw_cam_K=raw_cam_K, source_inv_K=inv_K, lidar2camera=lidar2camera,
-            source2input=camera2lidar, cam_feat=cam_feat, bev_feat=bev_feat,
-            sampled_pixels=pixels, source_img_size=self._raw_img_size)
+            source2input=camera2lidar, cam_feat=cam_feat, bev_feat=bev_feat, sampled_pixels=pixels)
 
         depth_rendered = render_out_dict['depth']
         loss_depth = (depth - depth_rendered).abs().mean()
         return loss_depth
+
+    @force_fp32()
+    def inference_novel_views(self, cam_feat, bev_feat, raw_cam_Ks, lidar2cams,
+                              novel_cam_K, novel_img_size, novel_cam_poses):
+        assert self._inference_mode
+        assert cam_feat.shape[0] == 1, 'batchsize should be 1.'
+        bid = 0
+        if isinstance(bev_feat, (list, tuple)):
+            bev_feat = bev_feat[0]
+
+        xs = torch.arange(start=0, end=novel_img_size[0]).type_as(novel_cam_K)
+        ys = torch.arange(start=0, end=novel_img_size[1]).type_as(novel_cam_K)
+        grid_y, grid_x = torch.meshgrid(ys, xs)
+        pixels = torch.stack([grid_x, grid_y], dim=-1).reshape(-1, 2)
+
+        novel_inv_K = torch.inverse(novel_cam_K)
+
+        ret = {
+            'depths': [],
+            'colors': [],
+            'ray_valid_ratios': [],
+        }
+
+        for i in range(len(novel_cam_poses)):
+            single_ret = self._inference_single_novel_view(
+                cam_feat[bid], bev_feat[bid], pixels, lidar2cams[bid], raw_cam_Ks[bid, :, :3, :3],
+                novel_cam_poses[i], novel_inv_K, novel_img_size)
+            ret['colors'].append(single_ret['color'])
+            ret['depths'].append(single_ret['depth'])
+            ret['ray_valid_ratios'].append(single_ret['ray_valid_ratio'])
+        ret['colors'] = torch.stack(ret['colors'])
+        ret['depths'] = torch.stack(ret['depths'])
+        ret['ray_valid_ratios'] = torch.stack(ret['ray_valid_ratios'])
+        return ret
+
+    def _inference_single_novel_view(self, cam_feat, bev_feat, pixels, lidar2cameras, raw_cam_Ks,
+                                     novel_cam2lidar, novel_inv_K, novel_img_size):
+        render_out_dict = self._render_rays_batch(
+            raw_cam_K=raw_cam_Ks, source_inv_K=novel_inv_K, lidar2camera=lidar2cameras,
+            source2input=novel_cam2lidar, cam_feat=cam_feat, bev_feat=bev_feat,
+            sampled_pixels=pixels)
+        novel_depth = render_out_dict['depth'].reshape(novel_img_size[1], novel_img_size[0])
+        novel_color = render_out_dict['color'].reshape(novel_img_size[1], novel_img_size[0], 3)
+        ray_valid_ratio = render_out_dict['ray_valid_ratio'].reshape(novel_img_size[1], novel_img_size[0])
+        ret = {
+            'depth': novel_depth,
+            'color': novel_color,
+            'ray_valid_ratio': ray_valid_ratio,
+        }
+        return ret

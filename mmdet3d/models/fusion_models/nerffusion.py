@@ -31,6 +31,7 @@ class NerfFusion(Base3DFusionModel):
         **kwargs,
     ) -> None:
         super().__init__()
+        self._inference_mode = kwargs.get('novel_view_inference', False)
 
         self.encoders = nn.ModuleDict()
         if encoders.get("camera") is not None:
@@ -128,6 +129,10 @@ class NerfFusion(Base3DFusionModel):
 
         return feats, coords, sizes
 
+    def set_inference_mode(self, mode=True):
+        self._inference_mode = mode
+        self.heads['nerf'].set_inference_mode(mode)
+
     @auto_fp16(apply_to=("img", "points"))
     def forward(
         self,
@@ -149,8 +154,17 @@ class NerfFusion(Base3DFusionModel):
         metas,
         **kwargs,
     ):
-        if isinstance(img, list):
-            raise NotImplementedError
+        if self._inference_mode:
+            assert not self.training
+            outputs = self.inference_novel_views(
+                img,
+                points,
+                lidar2camera,
+                camera_intrinsics,
+                kwargs["novel_cam_intrinsics"],
+                kwargs["novel_img_size"],
+                kwargs["novel_cam_poses"],
+            )
         else:
             outputs = self.forward_single(
                 img,
@@ -171,7 +185,7 @@ class NerfFusion(Base3DFusionModel):
                 metas,
                 **kwargs,
             )
-            return outputs
+        return outputs
 
     @auto_fp16(apply_to=("img", "points"))
     def forward_single(
@@ -229,3 +243,34 @@ class NerfFusion(Base3DFusionModel):
                 lidar2cams=lidar2camera, source_cam2input_lidars=source_cam2input_lidars,
                 source_cam2target_cams=source_cam2target_cams, points=points)
             return outputs
+
+    @auto_fp16(apply_to=("img", "points"))
+    def inference_novel_views(
+        self,
+        img,
+        points,
+        lidar2camera,
+        camera_intrinsics,
+        novel_cam_K,  # [3, 3]
+        novel_img_size,  # (x, y)
+        novel_cam_poses,  # (n_novel_cams, 4, 4)
+    ):
+        cam_feat = None
+        lidar_feat = None
+        for sensor in list(self.encoders.keys())[::-1]:  # lidar, camera, avoid OOM
+            if sensor == "camera":
+                # (bs, 3 + 256 * 3, 256, 704)
+                cam_feat = self.extract_camera_features(img)
+            elif sensor == "lidar":
+                # (bs, 256, 128, 128)
+                lidar_feat = self.extract_lidar_features(points)
+            else:
+                raise ValueError(f"unsupported sensor: {sensor}")
+
+        bev_feat = self.decoder["backbone"](lidar_feat)  # [(bs, 128, 128, 128), (bs, 256, 64, 64))]
+        bev_feat = self.decoder["neck"](bev_feat)  # [(bs, 512, 64, 128)]
+        outputs = self.heads["nerf"].inference_novel_views(
+            cam_feat=cam_feat, bev_feat=bev_feat,
+            raw_cam_Ks=camera_intrinsics, lidar2cams=lidar2camera,
+            novel_cam_K=novel_cam_K, novel_img_size=novel_img_size, novel_cam_poses=novel_cam_poses)
+        return outputs

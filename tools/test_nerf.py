@@ -11,7 +11,7 @@ from mmcv import Config, DictAction
 from mmcv.cnn import fuse_conv_bn
 from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
 from mmcv.runner import get_dist_info, init_dist, load_checkpoint, wrap_fp16_model
-from mmdet3d.apis import single_gpu_test, nerf_single_gpu_test, nerf_multi_gpu_test
+from mmdet3d.apis import single_gpu_test, nerf_single_gpu_test, nerf_multi_gpu_test, generate_novel_depth
 from mmdet3d.datasets import build_dataloader, build_dataset
 from mmdet3d.models import build_model
 from mmdet.apis import multi_gpu_test, set_random_seed
@@ -23,6 +23,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="MMDet test (and eval) a model")
     parser.add_argument("config", help="test config file path")
     parser.add_argument("checkpoint", help="checkpoint file")
+    parser.add_argument("--novel_view_inference", action="store_true")
     parser.add_argument("--out", help="output result file in pickle format")
     parser.add_argument(
         "--fuse-conv-bn",
@@ -134,6 +135,11 @@ def main():
     cfg = Config(recursive_eval(configs), filename=args.config)
     print(cfg)
 
+    # set config
+    cfg.model.heads.nerf.ray_batch_size = 4000
+    if args.novel_view_inference:
+        cfg.data.test.source_cameras_only = False
+
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
     # set cudnn_benchmark
@@ -196,7 +202,10 @@ def main():
             device_ids=[torch.cuda.current_device()],
             broadcast_buffers=False,
         )
-        outputs = nerf_multi_gpu_test(model, data_loader, save_dir)
+        if args.novel_view_inference:
+            outputs = generate_novel_depth(model, data_loader, save_dir)
+        else:
+            outputs = nerf_multi_gpu_test(model, data_loader, save_dir)
 
     rank, _ = get_dist_info()
     if rank == 0:
