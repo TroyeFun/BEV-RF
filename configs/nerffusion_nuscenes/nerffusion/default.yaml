@@ -6,19 +6,19 @@ model:
       type: NerfFusionHead
       dim_bev_feat: 512
       dim_cam_feat: 771  # 256 + 256 + 256 + 3 (laterals * 3 + raw_img)
-      n_rays: 600
+      n_rays: 300
       n_rays_for_depth_reg: 1200
-      ray_batch_size: 600
-      n_pts_uni: 32
-      n_gaussians: 4
-      n_pts_per_gaussian: 8
+      ray_batch_size: 1200
+      n_pts_uni: 64
+      n_gaussians: 16
+      n_pts_per_gaussian: 4
       gaussian_std: 2.5
       max_sample_depth: 100
       som_sigma: 2.0
       scene_range: ${point_cloud_range}  # [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
       raw_img_size: ${raw_img_size}
       source_img_size: ${source_img_size}
-      n_mlp_blocks: 4
+      n_mlp_blocks: 3
       n_mlp_hidden: 256
       loss_weights:
         kl: 1
