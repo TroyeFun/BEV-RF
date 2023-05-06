@@ -1,5 +1,8 @@
-import open3d as o3d
+import sys
+
+from matplotlib import colormaps
 import numpy as np
+import open3d as o3d
 
 
 def get_o3d_mesh(tsdf_vol, triangle_preserve_ratio=1.0, with_color=True):
@@ -70,3 +73,22 @@ def smooth_mesh(mesh, n_iter=10, method='laplacian'):
     mesh.compute_vertex_normals()
     mesh = funcs[method](mesh, number_of_iterations=n_iter)
     return mesh
+
+
+def color_mesh_with_height(mesh, max_h=None, min_h=None):
+    cmap = colormaps.get('rainbow')
+    heights = np.asarray(mesh.vertices)[:, 2]
+    if max_h is None:
+        max_h = heights.max()
+    if min_h is None:
+        min_h = heights.min()
+
+    colors = cmap(((heights - min_h) / (max_h - min_h)).tolist())[:, :3]
+    mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+    return mesh
+
+
+if __name__ == '__main__':
+    mesh = o3d.io.read_triangle_mesh(sys.argv[1])
+    o3d.visualization.draw_geometries([mesh])
+    import ipdb; ipdb.set_trace()
