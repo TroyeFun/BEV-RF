@@ -224,3 +224,4 @@ def visualize_novel_views(input_batch, result, save_dir, index):
 
     plt.savefig(osp.join(save_dir, 'vis', f'{index:05d}.png'))
     # plt.show()
+    plt.close()

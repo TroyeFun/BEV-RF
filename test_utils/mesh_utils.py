@@ -58,3 +58,15 @@ def image2pcd(color, depth, intrinsics):
     pcd.points = o3d.utility.Vector3dVector(points)
     pcd.colors = o3d.utility.Vector3dVector(color.reshape(-1, 3).astype(np.float64) / 255)
     return pcd
+
+
+def smooth_mesh(mesh, n_iter=10, method='laplacian'):
+    assert method in ['simple', 'laplacian', 'taubin']
+    funcs = {
+        'simple': o3d.geometry.TriangleMesh.filter_smooth_simple,
+        'laplacian': o3d.geometry.TriangleMesh.filter_smooth_laplacian,
+        'taubin': o3d.geometry.TriangleMesh.filter_smooth_taubin,
+    }
+    mesh.compute_vertex_normals()
+    mesh = funcs[method](mesh, number_of_iterations=n_iter)
+    return mesh

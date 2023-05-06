@@ -1,9 +1,10 @@
 """
 Code adapted from https://github.com/andyzeng/tsdf-fusion-python/blob/master/fusion.py
 """
-import numpy as np
+import logging
 
 from numba import njit, prange
+import numpy as np
 from skimage import measure
 
 try:
@@ -15,6 +16,8 @@ except Exception as err:
   print('Warning: {}'.format(err))
   print('Failed to import PyCUDA. Running fusion in CPU mode.')
   FUSION_GPU_MODE = 0
+
+status_logged = False
 
 
 class TSDFVolume:
@@ -42,10 +45,12 @@ class TSDFVolume:
     self._vol_bnds[:,1] = self._vol_bnds[:,0]+self._vol_dim*self._voxel_size
     self._vol_origin = self._vol_bnds[:,0].copy(order='C').astype(np.float32)
 
-    print("Voxel volume size: {} x {} x {} - # points: {:,}".format(
-      self._vol_dim[0], self._vol_dim[1], self._vol_dim[2],
-      self._vol_dim[0]*self._vol_dim[1]*self._vol_dim[2])
-    )
+    if not status_logged:
+      status_logged = True
+      print("Voxel volume size: {} x {} x {} - # points: {:,}".format(
+        self._vol_dim[0], self._vol_dim[1], self._vol_dim[2],
+        self._vol_dim[0]*self._vol_dim[1]*self._vol_dim[2])
+      )
 
     # Initialize pointers to voxel volume in CPU memory
     self._tsdf_vol_cpu = np.zeros(self._vol_dim).astype(np.float32) + 255
