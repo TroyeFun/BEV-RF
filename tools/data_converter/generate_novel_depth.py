@@ -100,9 +100,10 @@ def generate_novel_depth(model, data_loader, save_root):
     save_dir = osp.join(save_root, 'novel_views')
     create_novel_views_dir(save_dir)
 
-    novel_cam_poses = torch.tensor(sample_novel_cam_poses()).float().cuda()
+    # novel_cam_poses = torch.tensor(sample_novel_cam_poses()).float().cuda()
     novel_cam_K = torch.tensor(NOVEL_CAM_K).float().cuda()
     for i, data in enumerate(data_loader):
+        novel_cam_poses = torch.inverse(data['lidar2camera'].data[0][0]).cuda()
         data['novel_cam_intrinsics'] = novel_cam_K
         data['novel_img_size'] = NOVEL_IMG_SIZE
         data['novel_cam_poses'] = novel_cam_poses

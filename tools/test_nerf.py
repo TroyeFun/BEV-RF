@@ -11,12 +11,13 @@ from mmcv import Config, DictAction
 from mmcv.cnn import fuse_conv_bn
 from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
 from mmcv.runner import get_dist_info, init_dist, load_checkpoint, wrap_fp16_model
-from mmdet3d.apis import single_gpu_test, nerf_single_gpu_test, nerf_multi_gpu_test, generate_novel_depth
+from mmdet3d.apis import single_gpu_test, nerf_single_gpu_test, nerf_multi_gpu_test
 from mmdet3d.datasets import build_dataloader, build_dataset
 from mmdet3d.models import build_model
 from mmdet.apis import multi_gpu_test, set_random_seed
 from mmdet.datasets import replace_ImageToTensor
 from mmdet3d.utils import recursive_eval
+from tools.data_converter.generate_novel_depth import generate_novel_depth
 
 
 def parse_args():

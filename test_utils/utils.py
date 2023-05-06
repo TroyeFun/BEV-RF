@@ -177,15 +177,17 @@ def visualize_results(input_batch, result, save_path):
     # plt.show()
 
 
-def create_novel_views_dir(save_dir):
+def create_novel_views_dir(save_dir, create=True):
     vis_dir = osp.join(save_dir, 'vis')
     color_dir = osp.join(save_dir, 'color')
     depth_dir = osp.join(save_dir, 'depth')
     valid_ray_dir = osp.join(save_dir, 'valid_ray')
-    os.makedirs(vis_dir, exist_ok=True)
-    os.makedirs(color_dir, exist_ok=True)
-    os.makedirs(depth_dir, exist_ok=True)
-    os.makedirs(valid_ray_dir, exist_ok=True)
+    if create:
+        os.makedirs(vis_dir, exist_ok=True)
+        os.makedirs(color_dir, exist_ok=True)
+        os.makedirs(depth_dir, exist_ok=True)
+        os.makedirs(valid_ray_dir, exist_ok=True)
+    return vis_dir, color_dir, depth_dir, valid_ray_dir
 
 
 def visualize_novel_views(input_batch, result, save_dir, index):
