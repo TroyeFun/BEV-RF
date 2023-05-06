@@ -8,8 +8,6 @@ from mmcv.runner import get_dist_info
 import numpy as np
 import open3d as o3d
 from open3d.geometry import TriangleMesh as T
-import pytransform3d.camera as pc
-import pytransform3d.visualizer as pv
 import torch
 
 from test_utils import visualize_novel_views, create_novel_views_dir
@@ -64,6 +62,8 @@ def sample_novel_cam_poses():
 
 
 def visualize_cam_poses(cam_poses, cam_K=None, img_size=None):
+    import pytransform3d.camera as pc
+    import pytransform3d.visualizer as pv
     lidar_frame = T.create_coordinate_frame(size=2.0, origin=[0, 0, 0])
     frames = [lidar_frame]
     for cam_pose in cam_poses:

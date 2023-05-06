@@ -192,7 +192,7 @@ def visualize_novel_views(input_batch, result, save_dir, index):
     input_imgs = input_batch['img'].data[0][0]
     input_imgs = (input_imgs - input_imgs.min()) / (input_imgs.max() - input_imgs.min())
     input_imgs = input_imgs.permute(0, 2, 3, 1).cpu().numpy()
-    colors = result['colors'].cpu().numpy()
+    colors = result['colors'].cpu().numpy().clip(0.0, 1.0)
     depths = result['depths'].cpu().numpy()
     ray_valid_ratios = result['ray_valid_ratios'].cpu().numpy()
 
