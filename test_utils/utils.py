@@ -182,11 +182,15 @@ def create_novel_views_dir(save_dir, create=True):
     color_dir = osp.join(save_dir, 'color')
     depth_dir = osp.join(save_dir, 'depth')
     valid_ray_dir = osp.join(save_dir, 'valid_ray')
+    input_dir = osp.join(save_dir, 'input')
+    depth_vis_dir = osp.join(save_dir, 'depth_vis')
     if create:
         os.makedirs(vis_dir, exist_ok=True)
         os.makedirs(color_dir, exist_ok=True)
         os.makedirs(depth_dir, exist_ok=True)
         os.makedirs(valid_ray_dir, exist_ok=True)
+        os.makedirs(input_dir, exist_ok=True)
+        os.makedirs(depth_vis_dir, exist_ok=True)
     return vis_dir, color_dir, depth_dir, valid_ray_dir
 
 
@@ -210,6 +214,7 @@ def visualize_novel_views(input_batch, result, save_dir, index):
     for i in range(n_input):
         ax = fig.add_subplot(n_rows, n_cols, i + 1)
         ax.imshow(input_imgs[i])
+        plt.imsave(osp.join(save_dir, 'input', f'{index:05d}_{i:02d}.png'), input_imgs[i])
 
     for i in range(n_novel):
         ax = fig.add_subplot(n_rows, n_cols, 6 + i * 3 + 1)
@@ -219,9 +224,58 @@ def visualize_novel_views(input_batch, result, save_dir, index):
         ax = fig.add_subplot(n_rows, n_cols, 6 + i * 3 + 3)
         ax.imshow(ray_valid_ratios[i], cmap='rainbow_r')
         plt.imsave(osp.join(save_dir, 'color', f'{index:05d}_{i:02d}.png'), colors[i])
+        plt.imsave(osp.join(save_dir, 'depth_vis', f'{index:05d}_{i:02d}.png'), depths[i], cmap='rainbow_r')
         np.save(osp.join(save_dir, 'depth', f'{index:05d}_{i:02d}.npy'), depths[i])
         np.save(osp.join(save_dir, 'valid_ray', f'{index:05d}_{i:02d}.npy'), ray_valid_ratios[i])
 
     plt.savefig(osp.join(save_dir, 'vis', f'{index:05d}.png'))
     # plt.show()
-    plt.close()
+
+
+def visualize_scenerf_novel_views(data_root, recon_root):
+    input_id = 0
+    source_id = 1
+    end_id = 4000
+    input_file = osp.join(data_root, '{:06d}.png')
+    rgb_file = osp.join(recon_root, 'render_rgb', '08', '{:06d}_0.0_0.png')
+    depth_file = osp.join(recon_root, 'depth', '08', '{:06d}_0.0_0.npy')
+    os.makedirs(osp.join(recon_root, 'vis', '08'), exist_ok=True)
+
+    n_cols = 4
+    n_imgs = 1
+    while source_id < end_id:
+        while not os.path.exists(rgb_file.format(source_id)):
+            source_id += 1
+        print('id: ', source_id)
+        input_img = plt.imread(input_file.format(input_id))
+        source_img = plt.imread(input_file.format(source_id))
+        render_img = plt.imread(rgb_file.format(source_id))
+        depth_img = np.load(depth_file.format(source_id))
+        depth_img = depth_img.clip(max=np.percentile(depth_img, 95))
+
+        plt.clf()
+        fig = plt.figure(figsize=(10 * n_cols, 4 * n_imgs), dpi=72)
+        fig.tight_layout(pad=0.1, w_pad=0.1, h_pad=0.1)
+        plt.subplots_adjust(left=0.05, bottom=0.05, right=0.95, top=0.95, hspace=0.1)
+        ax = fig.add_subplot(n_imgs, n_cols, 1)
+        ax.imshow(input_img)
+        ax = fig.add_subplot(n_imgs, n_cols, 2)
+        ax.imshow(source_img)
+        ax = fig.add_subplot(n_imgs, n_cols, 3)
+        ax.imshow(render_img)
+        ax = fig.add_subplot(n_imgs, n_cols, 4)
+        ax.imshow(depth_img, cmap='rainbow_r')
+        plt.savefig(osp.join(recon_root, 'vis', '08', f'{source_id:06d}.png'))
+        plt.close()
+        input_id = source_id
+        source_id += 1
+    
+
+def reorg_scenerf_novel_views(recon_root):
+    import shutil
+    files = os.listdir(osp.join(recon_root, 'vis', '08'))
+    files = sorted(files)
+    os.makedirs(osp.join(recon_root, 'vis', '08_reorg'), exist_ok=True)
+    for i, file in enumerate(files):
+        shutil.copy(osp.join(recon_root, 'vis', '08', file), 
+                    osp.join(recon_root, 'vis', '08_reorg', f'{i:06d}.png'))

@@ -56,6 +56,9 @@ def nerf_multi_gpu_test(model, data_loader, save_dir):
     time.sleep(2)  # This line can prevent deadlock problem in some cases.
     os.makedirs(osp.join(save_dir, 'vis'), exist_ok=True)
     for i, data in enumerate(data_loader):
+        if i != 203:
+            continue
+        import ipdb; ipdb.set_trace()
         with torch.no_grad():
             result = model(**data)
         
